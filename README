@@ -1,0 +1,7 @@
+Programs are written in flatassembler dialect https://flatassembler.net
+
+i own an old tandon x86 compatible computer with an intel286 (equivalent??) cpu @10MHz with 1 MB ram. it has a 16 color gpu with an accompanying monitor. monitor and gpu are connected with a db9 vga plug
+
+software in this repo is written to run on said computer.
+
+current goal is to save the hdd contents. the computer doesnt boot anymore, most likely because of bitrot, and i want to save what is on its 65MB hdd
