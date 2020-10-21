@@ -9,6 +9,7 @@ start:
     ;init stack to use the 30kb before this boot sector
     mov ax,0
     mov ss,ax ; init stack segment
+    mov ds,ax ; init data segment
     mov sp,7C00h ; init stack pointer to right before this sector #TODO: check if this overwrites the first instructions
 
     mov si,strStartupMessage ; move address of message to si
