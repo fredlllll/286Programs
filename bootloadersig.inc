@@ -1,0 +1,2 @@
+rb 7C00h+512-2-$ ; fill up to the boot record signature, will throw an error on compile if code before it would push out the following signature
+db 055h,0AAh ; signature is expected by some bioses or it will ignore this bootloader

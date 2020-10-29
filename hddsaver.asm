@@ -1,5 +1,3 @@
-; this is a bootloader that only prints a message to the screen.
-; used to verify that a computer can boot from a floppy
 format binary ; output raw binary
 use16 ; generate 16 bit code
 
@@ -7,10 +5,13 @@ org 7C00h ; we expect our code to be located in this point in memory by default
 
 start:
     ;init stack to use the 30kb before this boot sector
-    mov ax,0
-    mov ss,ax ; init stack segment
-    mov ds,ax ; init data segment
-    mov sp,7C00h ; init stack pointer to right before this sector #TODO: check if this overwrites the first instructions
+    ;init other segment registers
+    mov bp,7C00h ; stack base pointer
+    xor ax,ax ; ax = 0
+    mov ds,ax ; data segment = 0
+    mov es,ax ; extra segment
+    mov ss,ax ; stack segment = 0
+    mov sp,bp ; stack pointer = 7C00h
 
     mov si,strStartupMessage ; move address of message to si
     mov cx,CONSTlenStartupMessage ; move message length to loop counter
@@ -59,7 +60,7 @@ copyNextLoop:
     jmp copyNextDone
 copyNextDoneHdd:
     ;tell user how many sectors have been written
-copyNextDone
+copyNextDone:
     mov si, strDone
     mov cx, CONSTlenDone
     call println
@@ -72,6 +73,8 @@ copyNextDone
 
 
 ; procedures ------------------------------
+
+include "32bitmath.inc"
 
 print: ; print string which is at adress si with length cx
     mov ah,0Eh ; TTY output function number
