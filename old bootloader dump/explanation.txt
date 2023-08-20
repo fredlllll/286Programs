@@ -1,0 +1,19 @@
+this is the old bootloader of the 286 in my attic. taken from the first sector of the harddrive
+
+it works as follows
+first few bytes initialize the registers and copy the entire bootloader from 7C00h to 7E00h.
+this is so it can load another bootloader to 7C00h from one of the partitions in the partition table
+it then jumps to the copy of itself to continue execution
+then it goes through the partition table (backwards) till it finds a partition marked for boot (first byte 80h instead of 00h). it supports up to 16 partitions apparently??
+if it doesnt find a suitable partition, it prints "Invalid Partition Table"
+this partition table entry is then copied to 7BEh(random adress i guess?)
+then it tries to copy the first sector of the partition to 7C00h. this is repeated up to 5 times if an error is encountered
+
+(it also just occured to me that harddrives count up the head, and then the sector, because the next head is already in position, while if counting up sector you have to move the heads for each sequential read. this way you can do <number of heads> sector reads quickly without having to move the heads)
+
+if reading that sector fails 5 times, it prints "Error loading Operating System" and refuses to elaborate further >_>
+
+if reading is successful, it checks the sector for the bootloader signature 55AAh at the end of it.
+if the signature is found, it jumps to 7C00h and bootloading is complete
+if its not found, it prints "Missing Operating System"
+
