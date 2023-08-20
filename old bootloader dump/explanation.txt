@@ -17,3 +17,6 @@ if reading is successful, it checks the sector for the bootloader signature 55AA
 if the signature is found, it jumps to 7C00h and bootloading is complete
 if its not found, it prints "Missing Operating System"
 
+after printing any message, it enters an endless loop
+
+side note: messages are preceeded by 2 bytes in memory that are also printed, those are \r\n
