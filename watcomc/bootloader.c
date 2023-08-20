@@ -10,7 +10,7 @@ void __declspec ( naked ) __declspec ( noreturn ) init (void)
         mov sp, bp
         
         mov ah, 02h
-        mov al, 1 ; num sectors
+        mov al, %%num_sectors%% ; num sectors
         mov ch, 0
         mov cl, 2
         mov dh, 0
