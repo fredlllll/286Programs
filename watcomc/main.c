@@ -44,7 +44,7 @@ void _cstart(void){
 }
 #pragma code_seg ( "start_segment" )
 void main(void){
-  unsigned char * hddSectorMemory = (unsigned char*) 0x8000;
+  unsigned char * hddSectorMemory = (unsigned char*) 0xFE00;
   int i;
   unsigned int result = loadFromHdd(hddSectorMemory);
   print("Read result: ");
