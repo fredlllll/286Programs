@@ -1,18 +1,20 @@
-void print_char (unsigned char inChar, unsigned short pageAndColor);
-#pragma aux print_char = \
+//#define DEBUG
+
+void printChar (unsigned char inChar, unsigned short pageAndColor);
+#pragma aux printChar = \
     "mov ah, 0x0e"   \
     "int 0x10"       \
     modify [ah]      \
     parm   [al][bx]
     
-void print_char_call(unsigned char inChar, unsigned short pageAndColor){
-  print_char(inChar,pageAndColor);
+void printChar_call(unsigned char inChar, unsigned short pageAndColor){
+  printChar(inChar,pageAndColor);
 }
 
 void print(const char* text){
   char ch;
   while (ch = *text++){
-    print_char(ch, 1);
+    printChar(ch, 1);
   }
 }
 
@@ -20,51 +22,140 @@ static char* hexAlphabet = "0123456789abcdef";
 
 void printHex(unsigned char value){
   char ch = hexAlphabet[value >> 4];
-  print_char(ch, 1);
+  printChar(ch, 1);
   ch = hexAlphabet[value & 0x0F];
-  print_char(ch, 1);
+  printChar(ch, 1);
 }
 void printHexShort(unsigned short value){
   char ch = hexAlphabet[value >> 12];
-  print_char(ch, 1);
+  printChar(ch, 1);
   ch = hexAlphabet[(value >> 8) & 0x0F];
-  print_char(ch, 1);
+  printChar(ch, 1);
   ch = hexAlphabet[(value >> 4) & 0x0F];
-  print_char(ch, 1);
+  printChar(ch, 1);
   ch = hexAlphabet[value & 0x0F];
-  print_char(ch, 1);
+  printChar(ch, 1);
 }
 
 void printHexLong(unsigned long int value){
   char ch = hexAlphabet[value >> 28];
-  print_char(ch, 1);
+  printChar(ch, 1);
   ch = hexAlphabet[(value >> 24) & 0x0F];
-  print_char(ch, 1);
+  printChar(ch, 1);
   ch = hexAlphabet[(value >> 20) & 0x0F];
-  print_char(ch, 1);
+  printChar(ch, 1);
   ch = hexAlphabet[(value >> 16) & 0x0F];
-  print_char(ch, 1);
+  printChar(ch, 1);
   ch = hexAlphabet[(value >> 12) & 0x0F];
-  print_char(ch, 1);
+  printChar(ch, 1);
   ch = hexAlphabet[(value >> 8) & 0x0F];
-  print_char(ch, 1);
+  printChar(ch, 1);
   ch = hexAlphabet[(value >> 4) & 0x0F];
-  print_char(ch, 1);
+  printChar(ch, 1);
   ch = hexAlphabet[value & 0x0F];
-  print_char(ch, 1);
+  printChar(ch, 1);
 }
 
-static unsigned char hddHeads = 6;
-static unsigned short hddTracks = 820;
-static unsigned char hddSectorsPerTrack = 26;
-static unsigned long int hddTotalSectors = 6*820*26; // 127920
-static unsigned char hddHeadsTimesSectors = 6*26;
+#define HDD_HEADS 6
+#define HDD_TRACKS 820
+#define HDD_SECTORS_PER_TRACK 26
+//#define HDD_TOTAL_SECTORS (HDD_HEADS*HDD_TRACKS*HDD_SECTORS_PER_TRACK)
+#define HDD_TOTAL_SECTORS (6*820*26)
 
-static unsigned char floppyHeads = 2;
-static unsigned short floppyTracks = 80;
-static unsigned char floppySectorsPerTrack = 18;
-static unsigned long int floppyTotalSectors = 2*80*18; // 2880
-static unsigned char floppyHeadsTimesSectors = 2*18;
+#define FLOPPY_HEADS 2
+#define FLOPPY_TRACKS 80
+#define FLOPPY_SECTORS_PER_TRACK 18
+//#define FLOPPY_TOTAL_SECTORS (FLOPPY_HEADS*FLOPPY_TRACKS*FLOPPY_SECTORS_PER_TRACK)
+#define FLOPPY_TOTAL_SECTORS (2*80*18)
+
+#ifdef DEBUG
+void printInt13Status(unsigned char status){
+  switch(status){
+    case 0x00:
+      print("no error");
+      break;
+    case 0x01:
+      print("bad command passed to driver");
+      break;
+    case 0x02:
+      print("address mark not found or bad sector");
+      break;
+    case 0x03:
+      print("diskette write protect error");
+      break;
+    case 0x04:
+      print("sector not found");
+      break;
+    case 0x05:
+      print("fixed disk reset failed");
+      break;
+    case 0x06:
+      print("diskette changed or removed");
+      break;
+    case 0x07:
+      print("bad fixed disk parameter table");
+      break;
+    case 0x08:
+      print("DMA overrun");
+      break;
+    case 0x09:
+      print("DMA access across 64k boundary");
+      break;
+    case 0x0a:
+      print("bad fixed disk sector flag");
+      break;
+    case 0x0b:
+      print("bad fixed disk cylinder");
+      break;
+    case 0x0c:
+      print("unsupported track/invalid media");
+      break;
+    case 0x0d:
+      print("invalid number of sectors on fixed disk format");
+      break;
+    case 0x0e:
+      print("fixed disk controlled data address mark detected");
+      break;
+    case 0x0f:
+      print("fixed disk DMA arbitration level out of range");
+      break;
+    case 0x10:
+      print("ECC/CRC error on disk read");
+      break;
+    case 0x11:
+      print("recoverable fixed disk data error, data fixed by ECC");
+      break;
+    case 0x20:
+      print("controller error (NEC for floppies)");
+      break;
+    case 0x40:
+      print("seek failure");
+      break;
+    case 0x80:
+      print("time out, drive not ready");
+      break;
+    case 0xAA:
+      print("fixed disk drive not ready");
+      break;
+    case 0xBB:
+      print("fixed disk undefined error");
+      break;
+    case 0xCC:
+      print("fixed disk write fault on selected drive");
+      break;
+    case 0xE0:
+      print("fixed disk status error/Error reg = 0");
+      break;
+    case 0xFF:
+      print("sense operation failed");
+      break;
+    default:
+      print("unknown error ");
+      printHex(status);
+  }
+  //print("\r\n");
+}
+#endif
 
 unsigned char getNextKeyPress(){
   volatile unsigned char result;
@@ -84,7 +175,7 @@ unsigned short waitForYesNo(){
     }else if(key == 'n'){
       return 0;
     }
-    print("Enter y for yes or n for no");
+    print("\r\nPress y for yes or n for no");
   }
 }
 
@@ -96,8 +187,8 @@ void resetDiskSystem(){
 }
 
 unsigned char readFromDrive(unsigned char numSectorsToRead, unsigned short cylinder, unsigned char head, unsigned char sector, unsigned char driveNumber, void* destination){
-  unsigned short myCx = (cylinder << 8) & ((cylinder>>2)& 0xC0) & sector;
   volatile unsigned char status;
+  unsigned short myCx = (cylinder << 8) | ((cylinder>>2)& 0xC0) | sector;
   _asm {
     mov ah, 0x2
     mov al, numSectorsToRead
@@ -120,10 +211,22 @@ unsigned char readWithRetry(unsigned char numSectorsToRead, unsigned long int lb
       return 1; //successful read
     }
     if(i >= 31){
-      print("Errored 32 times when reading sector ");
+      #ifdef DEBUG
+      print("Errored 32 times when reading CHS ");
+      printHexShort(cylinder);
+      printChar_call(' ',1);
+      printHex(head);
+      printChar_call(' ',1);
+      printHex(sector);
+      print(" (LBA ");
       printHexLong(lba);
-      print(" with status ");
+      print(") on drive ");
+      printHex(driveNumber);
+      print(" with error: ");
+      printInt13Status(status);
+      #else
       printHex(status);
+      #endif
       print("\r\nRetry?(y/n)");
       if(waitForYesNo()){
         i = -1;
@@ -138,8 +241,8 @@ unsigned char readWithRetry(unsigned char numSectorsToRead, unsigned long int lb
 }
 
 unsigned char writeToDrive(unsigned char numSectorsToWrite, unsigned short cylinder, unsigned char head, unsigned char sector, unsigned char driveNumber, void* source){
-  unsigned short myCx = (cylinder << 8) & ((cylinder>>2)& 0xC0) & sector;
   volatile unsigned char status;
+  unsigned short myCx = (cylinder << 8) | ((cylinder>>2)& 0xC0) | sector;
   _asm {
     mov ah, 0x3
     mov al, numSectorsToWrite
@@ -162,10 +265,22 @@ unsigned char writeWithRetry(unsigned char numSectorsToWrite, unsigned long int 
       return 1; //successful write
     }
     if(i >= 31){
-      print("Errored 32 times when writing sector ");
+      #ifdef DEBUG
+      print("Errored 32 times when writing CHS ");
+      printHexShort(cylinder);
+      printChar_call(' ',1);
+      printHex(head);
+      printChar_call(' ',1);
+      printHex(sector);
+      print(" (LBA ");
       printHexLong(lba);
-      print(" with status ");
+      print(") on drive ");
+      printHex(driveNumber);
+      print(" with error ");
+      printInt13Status(status);
+      #else
       printHex(status);
+      #endif
       print("\r\nRetry?(y/n)");
       if(waitForYesNo()){
         i = -1;
@@ -179,7 +294,33 @@ unsigned char writeWithRetry(unsigned char numSectorsToWrite, unsigned long int 
   }
 }
 
-unsigned long int CHSToLBA(unsigned short cylinder, unsigned char head, unsigned char sector){
+unsigned char advanceCHSHdd(unsigned short *cylinder, unsigned char *head, unsigned char *sector){
+  *sector += 1;
+  if(*sector > HDD_SECTORS_PER_TRACK){
+    *sector = 1;
+    *head += 1;
+  }
+  if(*head >= HDD_HEADS){
+    *head = 0;
+    *cylinder += 1;
+  }
+  return *cylinder < HDD_TRACKS; //return false if we have reached the end
+}
+
+unsigned char advanceCHSFloppy(unsigned short *cylinder, unsigned char *head, unsigned char *sector){
+  *sector += 1;
+  if(*sector > FLOPPY_SECTORS_PER_TRACK){
+    *sector = 1;
+    *head += 1;
+  }
+  if(*head >= FLOPPY_HEADS){
+    *head = 0;
+    *cylinder += 1;
+  }
+  return *cylinder < FLOPPY_TRACKS; //return false if we have reached the end
+}
+
+/*unsigned long int CHSToLBA(unsigned short cylinder, unsigned char head, unsigned char sector){
   return ((cylinder * hddHeads + head) * hddSectorsPerTrack) + sector - 1;
 }
 
@@ -197,7 +338,7 @@ void LBAToCHSFloppy(unsigned long int lba, unsigned short *cylinder, unsigned ch
   temp = lba % floppyHeadsTimesSectors;
   *head = temp / floppySectorsPerTrack;
   *sector = temp % floppySectorsPerTrack + 1;
-}
+}*/
 
 void waitForEnter(){
   while(1){
@@ -223,16 +364,16 @@ void prettyPrint(unsigned char* source){
     for(j = 0; j< 16; j++){
       int index = i*16+j;
       printHex(source[index]);
-      print_char_call(' ',1);
+      printChar_call(' ',1);
     }
-    print_char_call(' ',1);
-    print_char_call(' ',1);
-    print_char_call('"',1);
+    printChar_call(' ',1);
+    printChar_call(' ',1);
+    printChar_call('"',1);
     for(j = 0; j < 16; j++){
       int index = i*16+j;
-      print_char_call(source[index],1);
+      printChar_call(source[index],1);
     }
-    print_char_call('"',1);
+    printChar_call('"',1);
     print("\r\n");
   }
 }
@@ -252,21 +393,36 @@ void main(void){
   
   unsigned short currentFloppyCylinder = 0;
   unsigned char currentFloppyHead = 0;
-  unsigned char currentFloppySector = 1;
+  unsigned char currentFloppySector = 11;
   unsigned long int currentFloppyLBA = 10;
   
-  //TODO: add function to continue of different sectors than beginning
+  unsigned char hddAdvanced;
+  unsigned char floppyAdvanced;
   
-  for (currentHddLBA = 0; currentHddLBA < hddTotalSectors; ){
+  //TODO: add function to continue of different CHS than beginning
+  
+  for (currentHddLBA = 0; currentHddLBA < HDD_TOTAL_SECTORS; ){
     unsigned short copiedSectors = 0;
-    for(currentFloppyLBA = 10; (currentFloppyLBA < floppyTotalSectors) && (currentHddLBA < hddTotalSectors); ++currentHddLBA, ++currentFloppyLBA, ++copiedSectors){
-      LBAToCHSHdd(currentHddLBA, &currentHddCylinder, &currentHddHead, &currentHddSector);
+    for(currentFloppyLBA = 10; (currentFloppyLBA < FLOPPY_TOTAL_SECTORS) && (currentHddLBA < HDD_TOTAL_SECTORS); ++currentHddLBA, ++currentFloppyLBA, ++copiedSectors){
       if(!readWithRetry(1, currentHddLBA, currentHddCylinder, currentHddHead, currentHddSector, 0x80, hddSectorMemory)){
         goto leaveLoopAbort;
       }
-      LBAToCHSFloppy(currentFloppyLBA, &currentFloppyCylinder, &currentFloppyHead, &currentFloppySector);
       if(!writeWithRetry(1, currentFloppyLBA, currentFloppyCylinder, currentFloppyHead, currentFloppySector, 0, hddSectorMemory)){
         goto leaveLoopAbort;
+      }
+      
+      hddAdvanced = advanceCHSHdd(&currentHddCylinder, &currentHddHead, &currentHddSector);
+      floppyAdvanced = advanceCHSFloppy(&currentFloppyCylinder, &currentFloppyHead, &currentFloppySector);
+      if(hddAdvanced == 0){
+        //end of hdd, exit should be handled by the for loop?
+        print("End of hdd");
+      }
+      if(floppyAdvanced == 0){
+        //end of floppy, exit should also be handled by for?
+        currentFloppyCylinder = 0;
+        currentFloppyHead = 0;
+        currentFloppySector = 1;
+        print("End of floppy");
       }
     }
     print("Copied Sectors: ");

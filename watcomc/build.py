@@ -49,8 +49,9 @@ with open('bootloader.bin','rb') as f:
 signature = 0x55AA.to_bytes(2,'big')
 bootloader = bootloader.ljust(510, b'\0') +signature
 
+floppy_sectors = 2*80*18
 
-main = main.ljust(main_sectors*512,b'\0')
+main = main.ljust((floppy_sectors-1)*512,b'\0')
 
 with open('output.img', 'wb') as f:
   f.write(bootloader)
