@@ -253,8 +253,10 @@ def read_one_disk(src, dumps_dir):
             print('Payload CRC OK - disk is good.')
         else:
             print('WARNING: %s - re-read this disk.' % ev['reason'])
-        for off in ev['undeclared_badfill']:
-            print('WARNING: BADFILL at undeclared offset %d - re-read advised.' % off)
+        if ev['undeclared_badfill']:
+            print('NOTE: %d skipped sector(s) beyond the header log '
+                  'limit (48 hdd / 30 flp) - normal, no re-read needed.'
+                  % len(ev['undeclared_badfill']))
         if errors:
             print('NOTE: %d unreadable region(s) during raw read.' % len(errors))
     else:
@@ -376,6 +378,12 @@ def run_assembly(dumps_dir, out_path, verbose=True):
 
     suspect_count = sum(suspect)
     coverage = sum(covered)
+    # every BADFILL sector in the final image was skipped by the 286
+    # tool (hdd read fail or floppy write fail); headers only log the
+    # first 48+30 per disk, so count them from the data instead
+    skipped_count = sum(
+        1 for lba in range(total)
+        if covered[lba] and image_out[lba * SECTOR:(lba + 1) * SECTOR] == BADFILL)
     complete = (not gaps) and final_seen
 
     with open(out_path, 'wb') as f:
@@ -388,6 +396,7 @@ def run_assembly(dumps_dir, out_path, verbose=True):
         'declared_bad_hdd': declared_bad_hdd,
         'declared_bad_spots': declared_bad_spots,
         'suspect_count': suspect_count,
+        'skipped_count': skipped_count,
         'coverage': coverage,
         'overlaps': overlaps,
         'complete': complete,
@@ -443,6 +452,8 @@ def write_report(path, rep, dumps_dir):
     ap('sectors covered : %d / %d (%.2f%%)' % (
         rep['coverage'], rep['total'], 100.0 * rep['coverage'] / rep['total']))
     ap('suspect sectors : %d (from disks with failed payload crc)' % rep['suspect_count'])
+    ap('skipped sectors : %d contain !BAD-SECTOR! filler (headers only '
+       'log the first 48 hdd + 30 flp per disk)' % rep['skipped_count'])
     ap('declared bad hdd: %d' % len(rep['declared_bad_hdd']))
     ap('declared bad flp: %d (mapped to image lbas below)' % len(rep['declared_bad_spots']))
     if rep['gaps']:
@@ -481,6 +492,8 @@ def print_assembly_summary(rep, out_path, report_path):
     print('Coverage     : %d / %d sectors (%.2f%%)'
           % (rep['coverage'], rep['total'], 100.0 * rep['coverage'] / rep['total']))
     print('Suspect      : %d sectors' % rep['suspect_count'])
+    print('Skipped      : %d sectors (BADFILL, incl. beyond header log limit)'
+          % rep['skipped_count'])
     print('Declared bad : %d hdd lbas, %d floppy spots'
           % (len(rep['declared_bad_hdd']), len(rep['declared_bad_spots'])))
     if rep['gaps']:
@@ -654,10 +667,19 @@ def cmd_verify(args):
               % (len(data), SECTOR))
     total_img = min(len(data) // SECTOR, args.total)
     covered, declared, ndisks = coverage_and_declared(args.dumps, args.total)
-    tallies = {'ok': 0, 'bad-declared': 0, 'missing': 0,
-               'zero-unexpected': 0, 'badfill-undeclared': 0, 'MISMATCH': 0}
-    samples = {}
     zero = bytes(SECTOR)
+    first_cov = next((l for l in range(total_img)
+                      if covered[l]), None)
+    if first_cov is not None:
+        g = data[first_cov * SECTOR:(first_cov + 1) * SECTOR]
+        if g not in (pattern_sector(first_cov), zero, BADFILL):
+            sys.exit('This image contains real drive data (LBA %d). '
+                     '"verify" only works against "mkpattern" fake '
+                     'drives; use "assemble" and "badmap" for real '
+                     'dumps.' % first_cov)
+    tallies = {'ok': 0, 'bad-declared': 0, 'missing': 0,
+               'zero-unexpected': 0, 'skipped-unlogged': 0, 'MISMATCH': 0}
+    samples = {}
 
     def note(cls, lba):
         samples.setdefault(cls, [])
@@ -676,7 +698,7 @@ def cmd_verify(args):
         elif got == pattern_sector(lba):
             tallies['ok'] += 1
         elif got == BADFILL:
-            cls = 'bad-declared' if lba in declared else 'badfill-undeclared'
+            cls = 'bad-declared' if lba in declared else 'skipped-unlogged'
             tallies[cls] += 1
             note(cls, lba)
         elif got == zero:
@@ -694,8 +716,10 @@ def cmd_verify(args):
         if samples.get(k):
             line += '   e.g. LBA ' + ', '.join(map(str, samples[k][:6]))
         print(line)
-    bad = (tallies['MISMATCH'] or tallies['badfill-undeclared']
-           or tallies['zero-unexpected'])
+    # exact BADFILL sectors were put there by the tool on purpose (it
+    # substitutes before crc), so unlogged ones are normal when a disk
+    # had more than 48 bad hdd / 30 flp spots - only true anomalies fail
+    bad = tallies['MISMATCH'] or tallies['zero-unexpected']
     if bad:
         verdict = 'FAILED'
     elif tallies['missing']:
@@ -713,13 +737,19 @@ MAP_COLORS = {
     1: '#2ea44f',   # readable
     2: '#d93025',   # hdd read failed -> BADFILL
     3: '#e08a00',   # hdd read ok, floppy write failed -> recoverable by rerun
+    4: '#7a1010',   # BADFILL found but beyond the per-disk header log limit
 }
 MAP_NAMES = {0: 'not dumped', 1: 'readable', 2: 'hdd read failed',
-             3: 'floppy write failed'}
+             3: 'floppy write failed', 4: 'skipped, unlogged (>48)'}
 
 
 def build_badmap_state(dumps_dir, cyls, heads, spt):
-    """Per-LBA state byte + counters, from the best dump of each disk."""
+    """Per-LBA state byte + counters, from the best dump of each disk.
+
+    The 286 tool logs at most 48 hdd-bad and 30 flp-bad spots per disk
+    in the floppy header; anything beyond that is still BADFILLed in
+    the payload, so it is detected here by scanning the sector data.
+    """
     candidates, rejected, totals = load_dumps(dumps_dir)
     total = cyls * heads * spt
     state = bytearray(total)          # 0 = untouched
@@ -735,24 +765,32 @@ def build_badmap_state(dumps_dir, cyls, heads, spt):
             continue
         for j in range(min(c, total - s)):
             state[s + j] = 1
-    nh = nf = 0
+    nh = nf = nu = 0
     for rec in chosen:
         info = rec['ev']['info']
+        pl = rec['ev']['payload']
+        s = info['start_lba']
+        c = min(info['count'], max(0, total - s))
         for b in info['bad_hdd']:
             if b < total:
                 state[b] = 2
                 nh += 1
         for off in info['bad_flp']:
-            lba = info['start_lba'] + off
+            lba = s + off
             if 0 <= lba < total:
                 state[lba] = 3
                 nf += 1
-    return state, nh, nf, len(chosen)
+        for j in range(c):
+            lba = s + j
+            if state[lba] == 1 and pl[j * SECTOR:(j + 1) * SECTOR] == BADFILL:
+                state[lba] = 4
+                nu += 1
+    return state, nh, nf, nu, len(chosen)
 
 
 def cmd_badmap(args):
     C, H, S = args.cyls, args.heads, args.spt
-    state, nh, nf, ndisks = build_badmap_state(args.dumps, C, H, S)
+    state, nh, nf, nu, ndisks = build_badmap_state(args.dumps, C, H, S)
     CW, CH = 3, 12                    # pixel size of one sector cell
     ML, MT = 56, 78                   # left margin / top offset
     panel_gap, tick_h = 18, 14
@@ -767,16 +805,17 @@ def cmd_badmap(args):
            '<text x="%d" y="24" font-size="15">Tandon HDD bad-sector map '
            '(from %d floppies)</text>' % (ML, ndisks)]
     lx = ML
-    for st in (1, 2, 3, 0):
+    for st in (1, 2, 4, 3, 0):
         out.append('<rect x="%d" y="36" width="12" height="12" fill="%s"/>'
                    % (lx, MAP_COLORS[st]))
         out.append('<text x="%d" y="46" font-size="11" fill="#222">%s</text>'
                    % (lx + 16, MAP_NAMES[st]))
         lx += 16 + len(MAP_NAMES[st]) * 7 + 20
-    cnt = [state.count(i) for i in range(4)]
+    cnt = [state.count(i) for i in range(5)]
     out.append('<text x="%d" y="66" font-size="11" fill="#222">'
-               '%d readable | %d hdd-bad | %d flp-bad | %d not dumped'
-               '</text>' % (ML, cnt[1], cnt[2], cnt[3], cnt[0]))
+               '%d readable | %d hdd-bad | %d skipped-unlogged | '
+               '%d flp-bad | %d not dumped'
+               '</text>' % (ML, cnt[1], cnt[2], cnt[4], cnt[3], cnt[0]))
 
     for h in range(H):
         y0 = MT + h * (panel_h + panel_gap)
@@ -807,14 +846,14 @@ def cmd_badmap(args):
     with open(args.out, 'w') as f:
         f.write('\n'.join(out))
     print('wrote %s' % args.out)
-    per = [[0, 0, 0, 0] for _ in range(H)]
+    per = [[0, 0, 0, 0, 0] for _ in range(H)]
     for lba, st in enumerate(state):
         per[(lba // S) % H][st] += 1
-    print('per head:  ok / hdd-bad / flp-bad / not-dumped')
+    print('per head:  ok / hdd-bad / unlogged / flp-bad / not-dumped')
     for h in range(H):
         p = per[h]
-        print('  head %d: %6d / %5d / %5d / %6d'
-              % (h, p[1], p[2], p[3], p[0]))
+        print('  head %d: %6d / %5d / %5d / %5d / %6d'
+              % (h, p[1], p[2], p[4], p[3], p[0]))
     if nh or nf:
         print('\nreading tip: failure runs ending right before multiples '
               'of %d (track boundaries)\nlook like format-time defect '
