@@ -508,7 +508,11 @@ void seekToLBA(unsigned long target){
 /* ------------------------- hdd reading */
 
 /* retries RETRY_HDD times, then fills dest with BADFILL and logs the LBA.
-   never prompts, copying always continues */
+   never prompts, copying always continues.
+   NOTE: plain immediate re-reads first. calling the bios disk reset
+   between every attempt would recalibrate the drive (loud seek to
+   cylinder 0 and back) on every retry, so it is only done once midway
+   and once after giving up, in case the controller got wedged */
 void readHddResilient(unsigned char* dest){
   unsigned char tries;
   unsigned char status;
@@ -516,9 +520,14 @@ void readHddResilient(unsigned char* dest){
   status = readFromDrive(1, hddCyl, hddHead, hddSec, 0x80, dest);
   tries = 0;
   while(status != 0 && status != 0x11 && tries < RETRY_HDD){
-    resetDiskSystem();
+    if(tries == RETRY_HDD / 2){
+      resetDiskSystem();
+    }
     status = readFromDrive(1, hddCyl, hddHead, hddSec, 0x80, dest);
     tries++;
+  }
+  if(status != 0 && status != 0x11){
+    resetDiskSystem();
   }
   if(status == 0 || status == 0x11){
     /* 0x11 = recoverable ECC error, bios already corrected the data */
