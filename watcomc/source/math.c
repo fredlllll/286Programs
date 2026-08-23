@@ -1,4 +1,5 @@
 #include "math.h"
+#include "definitions.h"
 
 /* 32x16 bit multiply without the watcom runtime helper (__U4M):
    plain shift-add, called once at startup so speed is irrelevant */
@@ -35,4 +36,17 @@ unsigned long divLong(unsigned long num, unsigned int den){
     }
   }
   return q;
+}
+
+/* division by the fixed disk capacity by repeated subtraction,
+   quotient + remainder, avoids any runtime helper */
+unsigned long divByDiskCapacity(unsigned long v, unsigned long* remainder){
+  unsigned long n;
+  n = 0;
+  while(v >= DISK_CAPACITY){
+    v -= DISK_CAPACITY;
+    n++;
+  }
+  *remainder = v;
+  return n;
 }

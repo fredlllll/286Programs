@@ -67,3 +67,22 @@ void fillSkipPattern(unsigned char* dest){
     dest[i] = skipFillText[i % 13];
   }
 }
+
+/* bios data area tick counter at 0040:006C, incremented 18.206 times
+   per second by the timer interrupt. independent of the cmos battery */
+unsigned long biosTicks(void){
+  volatile unsigned short lo;
+  volatile unsigned short hi;
+  _asm{
+    push es
+    mov ax, 0x0040
+    mov es, ax
+    xor bx, bx
+    mov ax, es:[bx+0x6C]
+    mov lo, ax
+    mov ax, es:[bx+0x6E]
+    mov hi, ax
+    pop es
+  };
+  return ((unsigned long)hi << 16) | lo;
+}

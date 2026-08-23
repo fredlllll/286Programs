@@ -1,4 +1,5 @@
-/* small shared helpers: byte poking into raw sectors, crc16, buffer fills */
+/* small shared helpers: byte poking into raw sectors, crc16, buffer fills,
+   bios data area access */
 #ifndef UTIL_H
 #define UTIL_H
 
@@ -9,5 +10,6 @@ unsigned int crcBuf(unsigned int crc, unsigned char* p, unsigned int n);
 unsigned char memcmpBuf(unsigned char* a, unsigned char* b);
 void fillBadPattern(unsigned char* dest);
 void fillSkipPattern(unsigned char* dest);
+unsigned long biosTicks(void);
 
 #endif

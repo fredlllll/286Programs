@@ -4,5 +4,6 @@
 
 unsigned long mulLong(unsigned long a, unsigned int b);
 unsigned long divLong(unsigned long num, unsigned int den);
+unsigned long divByDiskCapacity(unsigned long v, unsigned long* remainder);
 
 #endif

@@ -1,7 +1,7 @@
 // HDD saver 2.0 - dumps the whole 60MB MFM/RLL drive to 1.44MB floppies
 //
 // floppy layout (per disk):
-//   LBA 0      : header sector, see HEADER_* defines below
+//   LBA 0      : header sector, see definitions.h and buildHeader()
 //   LBA 1..9   : reserved (zeros)
 //   LBA 10..2879: payload = consecutive sectors of the hdd image
 //
@@ -31,49 +31,26 @@
 // payload crc therefore covers the stream with every untrustworthy sector
 // replaced by the BADFILL pattern
 //
-// note: no 32 bit division/multiplication anywhere, watcom would emit
-// calls to runtime helpers (__U4D etc.) which we dont link against.
-// 32 bit add/sub/cmp/constant-shift is fine, it compiles inline.
-// see math.c for the shift-add helpers that stand in for them
+// this file holds the application logic: session state, batching,
+// per-disk flow and the startup prompts. hardware access lives in
+// int13.c/hdd.c/floppy.c, output in print.c, input in keyboard.c
 
+#include "definitions.h"
 #include "math.h"
 #include "print.h"
 #include "keyboard.h"
 #include "int13.h"
 #include "util.h"
-#include "definitions.h"
+#include "hdd.h"
+#include "floppy.h"
 
-/* runtime geometry, initialized from the defines above; the startup
-   prompts allow overriding because the bios may translate differently
-   (e.g. after the cmos battery died) and reads only line up when we
-   use exactly the geometry the data was originally written with */
-unsigned int hddCyls = HDD_CYLS;
-unsigned char hddHeads = HDD_HEADS;
-unsigned char hddSpt = HDD_SPT;
-unsigned long hddTotalSectors = HDD_TOTAL_SECTORS;
-unsigned char hddRetries = RETRY_HDD;   /* 0 = one attempt, no resets */
-unsigned char headMask = 0xFF;          /* bit N = dump head N */
+/* ------------------------- buffers and batch state */
 
-/* ------------------------- buffers, declared first so they sit low */
-
-static unsigned char batchBuf[BATCH_SECTORS*512];
-static unsigned char verifyBuf[512];
+static unsigned char batchBuf[BATCH_SECTORS*512]; /* one full hdd track */
 static unsigned char headerBuf[512];
-static unsigned long badLbasDisk[MAX_BAD];
-static unsigned long badLbasAll[MAX_BAD_ALL];
-static unsigned int badFlpOffsets[MAX_BAD_FLP];
+static unsigned char batchFill;
 
-/* ------------------------- state */
-
-static unsigned short hddCyl;
-static unsigned char hddHead;
-static unsigned char hddSec;
-static unsigned long hddLBA;
-
-static unsigned short flpCyl;
-static unsigned char flpHead;
-static unsigned char flpSec;
-static unsigned long flpLBA;
+/* ------------------------- session state */
 
 static unsigned long diskIndex;
 static unsigned long diskStartLBA;
@@ -82,47 +59,13 @@ static unsigned char hddHeadSaved;
 static unsigned char hddSecSaved;
 static unsigned int sectorCount;
 static unsigned int payloadCrc;
-static unsigned int diskBadCount;
-static unsigned int badFlpCount;
-static unsigned int allBadCount;
-static unsigned char batchFill;
 static unsigned char escFlag;
 static unsigned long diskStartTicks;
-
-unsigned long divByDiskCapacity(unsigned long v, unsigned long* remainder){
-  unsigned long n;
-  n = 0;
-  while(v >= DISK_CAPACITY){
-    v -= DISK_CAPACITY;
-    n++;
-  }
-  *remainder = v;
-  return n;
-}
-
-/* bios data area tick counter at 0040:006C, incremented 18.206 times
-   per second by the timer interrupt. independent of the cmos battery */
-unsigned long biosTicks(void){
-  volatile unsigned short lo;
-  volatile unsigned short hi;
-  _asm{
-    push es
-    mov ax, 0x0040
-    mov es, ax
-    xor bx, bx
-    mov ax, es:[bx+0x6C]
-    mov lo, ax
-    mov ax, es:[bx+0x6E]
-    mov hi, ax
-    pop es
-  };
-  return ((unsigned long)hi << 16) | lo;
-}
 
 /* append estimated time until this disk finishes, based on pace so far.
    stays in tick units as long as possible; minutes extracted by
    subtraction (1092 ticks ~= 60 s), seconds by native 16-bit division */
-void printEta(unsigned long elapsedTicks, unsigned int done){
+static void printEta(unsigned long elapsedTicks, unsigned int done){
   unsigned long totalT;
   unsigned long remainT;
   unsigned long m;
@@ -150,143 +93,14 @@ void printEta(unsigned long elapsedTicks, unsigned int done){
   printDecLong(s);
 }
 
-unsigned char advanceCHSHdd(void){
-  hddSec += 1;
-  if(hddSec > hddSpt){
-    hddSec = 1;
-    hddHead += 1;
-  }
-  if(hddHead >= hddHeads){
-    hddHead = 0;
-    hddCyl += 1;
-  }
-  return hddCyl < hddCyls;
-}
-
-void advanceCHSFloppy(void){
-  flpSec += 1;
-  if(flpSec > FLPD_SPT){
-    flpSec = 1;
-    flpHead += 1;
-  }
-  if(flpHead >= FLPD_HEADS){
-    flpHead = 0;
-    flpCyl += 1;
-  }
-}
-
-/* position hdd chs at lba without any 32 bit division:
-   just step forward from 0/0/1, cheap enough for these drive sizes */
-void seekToLBA(unsigned long target){
-  hddCyl = 0;
-  hddHead = 0;
-  hddSec = 1;
-  while(target){
-    advanceCHSHdd();
-    target--;
-  }
-}
-
-/* ------------------------- hdd reading */
-
-/* reads one hdd sector. retries up to hddRetries times (configurable,
-   0 = single attempt). resets only kick in when retrying is enabled:
-   a bios disk reset recalibrates the drive (loud seek to cylinder 0
-   and back), which we avoid on a drive with weak heads */
-void readHddResilient(unsigned char* dest){
-  unsigned char tries;
-  unsigned char status;
-
-  status = readFromDrive(1, hddCyl, hddHead, hddSec, 0x80, dest);
-  tries = 0;
-  while(status != 0 && status != 0x11 && tries < hddRetries){
-    if(hddRetries >= 2 && tries == hddRetries / 2){
-      resetDiskSystem();
-    }
-    status = readFromDrive(1, hddCyl, hddHead, hddSec, 0x80, dest);
-    tries++;
-  }
-  if(status != 0 && status != 0x11 && hddRetries > 0){
-    resetDiskSystem();
-  }
-  if(status == 0 || status == 0x11){
-    /* 0x11 = recoverable ECC error, bios already corrected the data */
-    return;
-  }
-
-  print("\r\nHDD read fail CHS ");
-  printDecLong(hddCyl);
-  printChar('/', 1);
-  printDecLong(hddHead);
-  printChar('/', 1);
-  printDecLong(hddSec);
-  print(" LBA ");
-  printDecLong(hddLBA);
-  print(": ");
-  printInt13Status(status);
-  print(", skipping\r\n");
-
-  if(diskBadCount < MAX_BAD){
-    badLbasDisk[diskBadCount++] = hddLBA;
-  }
-  if(allBadCount < MAX_BAD_ALL){
-    badLbasAll[allBadCount++] = hddLBA;
-  }
-  fillBadPattern(dest);
-}
-
-/* ------------------------- floppy writing */
-
-/* best effort write with read-back verify, no prompting: up to
-   RETRY_FLOPPY*REWRITE_ROUNDS attempts, then gives up on this sector:
-   buffer is replaced with BADFILL, payload offset logged, copying continues.
-   returns 0 = written+verified, 1 = gave up */
-unsigned char writeFloppyAuto(unsigned char* src){
-  unsigned char rounds;
-  unsigned char tries;
-  unsigned char status;
-  unsigned int off;
-
-  rounds = 0;
-  while(rounds < REWRITE_ROUNDS){
-    tries = 0;
-    status = writeToDrive(1, flpCyl, flpHead, flpSec, 0, src);
-    while(status != 0 && tries < RETRY_FLOPPY){
-      resetDiskSystem();
-      status = writeToDrive(1, flpCyl, flpHead, flpSec, 0, src);
-      tries++;
-    }
-    if(status == 0){
-      status = readFromDrive(1, flpCyl, flpHead, flpSec, 0, verifyBuf);
-      if(status == 0 && memcmpBuf(src, verifyBuf) == 0){
-        return 0;
-      }
-    }
-    rounds++;
-    resetDiskSystem();
-  }
-
-  off = sectorCount;
-  if(badFlpCount < MAX_BAD_FLP){
-    badFlpOffsets[badFlpCount++] = off;
-  }
-  fillBadPattern(src);
-  print("\r\nFLOPPY FAIL off ");
-  printDecLong(off);
-  print(" (hdd LBA ");
-  printDecLong(hddLBA);
-  print("), marked bad\r\n");
-  return 1;
-}
-
 /* writes batchBuf[0..batchFill) to floppy, updates crc/count/position.
    returns 0 ok, 2 = too many floppy failures, disk should be redone
    on fresh media. the crc covers every sector as buffered here, with
    given-up sectors already replaced by BADFILL */
-unsigned char flushBatch(void){
+static unsigned char flushBatch(void){
   unsigned int i;
   for(i = 0; i < batchFill; i++){
-    writeFloppyAuto(batchBuf + i * 512);
+    writeFloppyAuto(batchBuf + i * 512, sectorCount);
     payloadCrc = crcBuf(payloadCrc, batchBuf + i * 512, 512);
     sectorCount++;
     advanceCHSFloppy();
@@ -300,7 +114,7 @@ unsigned char flushBatch(void){
   return 0;
 }
 
-void progressLine(void){
+static void progressLine(void){
   unsigned long now;
   print("\r\nD:");
   printDecLong(diskIndex);
@@ -320,7 +134,7 @@ void progressLine(void){
 
 /* ------------------------- header handling */
 
-void buildHeader(unsigned char finalFlag){
+static void buildHeader(unsigned char finalFlag){
   unsigned int i;
   unsigned int hc;
   static char* id = "HDDSAVER 2.5";
@@ -355,7 +169,7 @@ void buildHeader(unsigned char finalFlag){
 
 /* returns 0 = header written+verified, nonzero = header could not be
    written, disk is useless and must be redone */
-unsigned char writeHeaderSector(void){
+static unsigned char writeHeaderSector(void){
   unsigned short cylSave;
   unsigned char headSave;
   unsigned char secSave;
@@ -368,7 +182,7 @@ unsigned char writeHeaderSector(void){
   flpCyl = 0;
   flpHead = 0;
   flpSec = 1;
-  r = writeFloppyAuto(headerBuf);
+  r = writeFloppyAuto(headerBuf, sectorCount);
   flpCyl = cylSave;
   flpHead = headSave;
   flpSec = secSave;
@@ -377,7 +191,7 @@ unsigned char writeHeaderSector(void){
 
 /* ------------------------- per disk body */
 
-void resetForDiskStart(void){
+static void resetForDiskStart(void){
   hddCyl = hddCylSaved;
   hddHead = hddHeadSaved;
   hddSec = hddSecSaved;
@@ -395,7 +209,7 @@ void resetForDiskStart(void){
 
 /* copies until end of hdd or ESC. returns 0 = finalized ok,
    2 = restart requested (state was rewound by caller via resetForDiskStart) */
-unsigned char doOneDisk(void){
+static unsigned char doOneDisk(void){
   unsigned char r;
   while(hddLBA < hddTotalSectors &&
         (sectorCount + batchFill) < DISK_CAPACITY){

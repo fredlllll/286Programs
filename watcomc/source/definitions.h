@@ -1,3 +1,6 @@
+#ifndef DEFINITIONS_H
+#define DEFINITIONS_H
+
 #define HDD_CYLS 820
 #define HDD_HEADS 6
 #define HDD_SPT 26
@@ -18,3 +21,4 @@
 #define MAX_BAD_ALL 64
 #define MAX_BAD_FLP 30          /* must match header layout space */
 #define DISK_BAD_LIMIT 10       /* this many floppy failures = ask for fresh disk */
+#endif
