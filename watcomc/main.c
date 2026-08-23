@@ -56,6 +56,15 @@
 #define MAX_BAD_FLP 30          /* must match header layout space */
 #define DISK_BAD_LIMIT 10       /* this many floppy failures = ask for fresh disk */
 
+/* runtime geometry, initialized from the defines above; the startup
+   prompts allow overriding because the bios may translate differently
+   (e.g. after the cmos battery died) and reads only line up when we
+   use exactly the geometry the data was originally written with */
+unsigned int hddCyls = HDD_CYLS;
+unsigned char hddHeads = HDD_HEADS;
+unsigned char hddSpt = HDD_SPT;
+unsigned long hddTotalSectors = HDD_TOTAL_SECTORS;
+
 void printChar (unsigned char inChar, unsigned short pageAndColor);
 #pragma aux printChar = \
     "mov ah, 0x0e"   \
@@ -152,6 +161,29 @@ void resetDiskSystem(){
   _asm{
     xor ax,ax
     int 0x13
+  };
+}
+
+/* INT13 AH=08: what the bios itself thinks the drive looks like.
+   ES:DI must be writable, some xt-class bioses copy a parameter table
+   there. results are max indices except sectors-per-track */
+unsigned char prmTable[16];
+volatile unsigned char biosCylLo;
+volatile unsigned char biosCylHiSec;
+volatile unsigned char biosHeadMax;
+
+void queryBiosDrive(void){
+  unsigned short diOff = (unsigned short)(unsigned int)prmTable;
+  _asm{
+    mov ah, 0x08
+    mov dl, 0x80
+    mov di, diOff
+    push ds
+    pop es
+    int 0x13
+    mov biosCylLo, ch
+    mov biosCylHiSec, cl
+    mov biosHeadMax, dh
   };
 }
 
@@ -421,17 +453,32 @@ unsigned long divByDiskCapacity(unsigned long v, unsigned long* remainder){
   return n;
 }
 
+/* 32x16 bit multiply without the watcom runtime helper (__U4M):
+   plain shift-add, called once at startup so speed is irrelevant */
+unsigned long mulLong(unsigned long a, unsigned int b){
+  unsigned long r;
+  r = 0;
+  while(b){
+    if(b & 1){
+      r += a;
+    }
+    a += a;
+    b >>= 1;
+  }
+  return r;
+}
+
 unsigned char advanceCHSHdd(void){
   hddSec += 1;
-  if(hddSec > HDD_SPT){
+  if(hddSec > hddSpt){
     hddSec = 1;
     hddHead += 1;
   }
-  if(hddHead >= HDD_HEADS){
+  if(hddHead >= hddHeads){
     hddHead = 0;
     hddCyl += 1;
   }
-  return hddCyl < HDD_CYLS;
+  return hddCyl < hddCyls;
 }
 
 void advanceCHSFloppy(void){
@@ -447,7 +494,7 @@ void advanceCHSFloppy(void){
 }
 
 /* position hdd chs at lba without any 32 bit division:
-   just step forward from 0/0/1, at most 127919 cheap iterations */
+   just step forward from 0/0/1, cheap enough for these drive sizes */
 void seekToLBA(unsigned long target){
   hddCyl = 0;
   hddHead = 0;
@@ -570,7 +617,7 @@ void progressLine(void){
   print(" LBA:");
   printDecLong(hddLBA);
   print("/");
-  printDecLong(HDD_TOTAL_SECTORS);
+  printDecLong(hddTotalSectors);
   print(" n:");
   printDecLong(sectorCount);
   print(" bad:");
@@ -582,7 +629,7 @@ void progressLine(void){
 void buildHeader(unsigned char finalFlag){
   unsigned int i;
   unsigned int hc;
-  static char* id = "HDDSAVER 2.1";
+  static char* id = "HDDSAVER 2.2";
   for(i = 0; i < 512; i++){
     headerBuf[i] = 0;
   }
@@ -597,7 +644,7 @@ void buildHeader(unsigned char finalFlag){
   poke16(headerBuf + 14, sectorCount);
   poke16(headerBuf + 16, payloadCrc);
   poke16(headerBuf + 18, diskBadCount);
-  poke32(headerBuf + 20, HDD_TOTAL_SECTORS);
+  poke32(headerBuf + 20, hddTotalSectors);
   poke16(headerBuf + 254, badFlpCount);
   for(i = 0; i < diskBadCount && i < MAX_BAD; i++){
     poke32(headerBuf + 24 + i * 4, badLbasDisk[i]);
@@ -656,7 +703,7 @@ void resetForDiskStart(void){
    2 = restart requested (state was rewound by caller via resetForDiskStart) */
 unsigned char doOneDisk(void){
   unsigned char r;
-  while(hddLBA < HDD_TOTAL_SECTORS &&
+  while(hddLBA < hddTotalSectors &&
         (sectorCount + batchFill) < DISK_CAPACITY){
     if(escPressed()){
       escFlag = 1;
@@ -681,7 +728,7 @@ unsigned char doOneDisk(void){
       return r;
     }
   }
-  if(sectorCount > 0 || hddLBA >= HDD_TOTAL_SECTORS){
+  if(sectorCount > 0 || hddLBA >= hddTotalSectors){
     r = writeHeaderSector();
     if(r != 0){
       return r;
@@ -709,21 +756,63 @@ void _cstart(void){
 void main(void){
   unsigned long startLBA;
   unsigned long rem;
+  unsigned long v;
   unsigned int i;
+  unsigned int biosCyls;
 
   crcInit();
 
-  print("\r\n\r\nHDD saver 2.1\r\n");
+  print("\r\n\r\nHDD saver 2.2\r\n");
   print("Dumps ");
-  printDecLong(HDD_TOTAL_SECTORS);
+  printDecLong(hddTotalSectors);
   print(" hdd sectors (");
-  printDecLong((HDD_TOTAL_SECTORS * 512UL) >> 20);
+  printDecLong(hddTotalSectors >> 11);
   print(" MB) to floppies, ");
   printDecLong(DISK_CAPACITY);
   print(" sectors per disk.\r\n");
   print("Unattended: unreadable hdd sectors are skipped+logged,\r\n");
   print("floppy writes are verified and retried automatically.\r\n");
   print("ESC stops cleanly after the current transfer.\r\n\r\n");
+
+  queryBiosDrive();
+  biosCyls = ((biosCylHiSec & 0xC0) << 2) | biosCylLo;
+  if(biosCyls || biosHeadMax){
+    print("BIOS drive 0x80: ");
+    printDecLong(biosCyls + 1);
+    print(" cyl, ");
+    printDecLong(biosHeadMax + 1);
+    print(" heads, ");
+    printDecLong(biosCylHiSec & 0x3F);
+    print(" spt\r\n");
+  }else{
+    print("BIOS geometry query failed, using defaults.\r\n");
+  }
+  print("Geometry must match how the data was written!\r\n");
+
+  v = decInput("Cylinders", hddCyls);
+  if(v && v <= 1024){
+    hddCyls = (unsigned int)v;
+  }
+  v = decInput("Heads", hddHeads);
+  if(v && v <= 255){
+    hddHeads = (unsigned char)v;
+  }
+  v = decInput("Sectors per track", hddSpt);
+  if(v && v <= 63){
+    hddSpt = (unsigned char)v;
+  }
+  hddTotalSectors = mulLong(mulLong(hddCyls, hddHeads), hddSpt);
+  print("Using: ");
+  printDecLong(hddCyls);
+  print("/");
+  printDecLong(hddHeads);
+  print("/");
+  printDecLong(hddSpt);
+  print(", total ");
+  printDecLong(hddTotalSectors);
+  print(" sectors (");
+  printDecLong(hddTotalSectors >> 11);
+  print(" MB).\r\n");
 
   startLBA = decInput("Resume at hdd LBA", 0);
   diskStartLBA = startLBA;
@@ -763,7 +852,7 @@ void main(void){
       resetForDiskStart();
     }
 
-    if(hddLBA >= HDD_TOTAL_SECTORS){
+    if(hddLBA >= hddTotalSectors){
       print("\r\n=== DUMP COMPLETE ===\r\n");
       print("Disks used: ");
       printDecLong(diskIndex + 1);
