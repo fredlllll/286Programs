@@ -4,27 +4,23 @@
 #include "print.h"
 #include "util.h"
 
-unsigned short flpCyl;
-unsigned char flpHead;
-unsigned char flpSec;
+struct Chs flpPos = {0, 0, 1};
 unsigned long flpLBA;
 
 unsigned int badFlpOffsets[MAX_BAD_FLP];
 unsigned int badFlpCount;
 
+/* the floppy's geometry comes straight from definitions.h and never
+   changes at runtime; totalSectors is unused for stepping but kept
+   populated for completeness */
+static const struct Geometry flpGeom = {
+  FLPD_CYLS, FLPD_HEADS, FLPD_SPT, FLPD_TOTAL_SECTORS };
+
 /* scratch space for read-back verification of written sectors */
 static unsigned char verifyBuf[512];
 
 void advanceCHSFloppy(void){
-  flpSec += 1;
-  if(flpSec > FLPD_SPT){      /* past last sector -> next head */
-    flpSec = 1;
-    flpHead += 1;
-  }
-  if(flpHead >= FLPD_HEADS){  /* past last head -> next cylinder */
-    flpHead = 0;
-    flpCyl += 1;
-  }
+  stepChs(&flpPos, &flpGeom);
 }
 
 /* why verify every write: old floppy media lies. a write can report
@@ -47,15 +43,15 @@ unsigned char writeFloppyAuto(unsigned char* src, unsigned int payloadOffset){
   rounds = 0;
   while(rounds < REWRITE_ROUNDS){
     tries = 0;
-    status = writeToDrive(1, flpCyl, flpHead, flpSec, 0, src);
+    status = writeToDrive(1, flpPos.cyl, flpPos.head, flpPos.sec, 0, src);
     while(status != 0 && tries < RETRY_FLOPPY){
       resetDiskSystem();       /* clear controller error state */
-      status = writeToDrive(1, flpCyl, flpHead, flpSec, 0, src);
+      status = writeToDrive(1, flpPos.cyl, flpPos.head, flpPos.sec, 0, src);
       tries++;
     }
     if(status == 0){
       /* write claimed success - now prove it */
-      status = readFromDrive(1, flpCyl, flpHead, flpSec, 0, verifyBuf);
+      status = readFromDrive(1, flpPos.cyl, flpPos.head, flpPos.sec, 0, verifyBuf);
       if(status == 0 && memcmpBuf(src, verifyBuf) == 0){
         return 0;
       }

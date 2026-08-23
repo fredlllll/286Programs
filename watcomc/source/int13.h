@@ -15,9 +15,38 @@
      dl = drive number: 0x80 = first hard disk, 0 = first floppy
    data is transferred through es:bx, a "segment:offset" pointer pair.
    we run with all segment registers = 0, so es:bx is effectively a
-   plain linear address */
+   plain linear address
+
+   this header also owns the chs addressing types shared by the hdd
+   and floppy modules, since chs is exactly how int 13h sees disks */
 #ifndef INT13_H
 #define INT13_H
+
+/* ---- chs addressing types ---- */
+
+/* one position on a chs-addressed drive. sectors are numbered from
+   1, cylinders and heads from 0 - an ancient bios convention that
+   still bites today */
+struct Chs {
+  unsigned short cyl;    /* 0..1023 fit in the int13 register bits */
+  unsigned char head;
+  unsigned char sec;     /* starts at 1! */
+};
+
+/* drive geometry: how many cylinders/heads/sectors a drive has, and
+   the resulting total capacity. used both for the runtime-tunable
+   hdd description and the fixed floppy layout */
+struct Geometry {
+  unsigned int cyls;
+  unsigned char heads;
+  unsigned char spt;
+  unsigned long totalSectors;
+};
+
+/* advances a chs position by one sector, wrapping like the bios
+   expects: sector overflows into head, head into cylinder. works
+   for any drive, which is why both disk modules share it */
+void stepChs(struct Chs* pos, const struct Geometry* geom);
 
 /* filled in by queryBiosDrive(), read by main() after the call.
    volatile because the bios changes them behind the compiler's back */

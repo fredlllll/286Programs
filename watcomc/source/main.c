@@ -4,9 +4,10 @@
 // per-disk flow and the startup prompts. everything below it is
 // plumbing that lives in its own module:
 //
-//   int13.c    raw bios disk calls (read/write/reset/query)
+//   int13.c    raw bios disk calls (read/write/reset/query),
+//              chs addressing types + stepping helper
 //   hdd.c      hdd geometry, position tracking, resilient reads
-//   floppy.c   position tracking, verified writes
+//   floppy.c   position tracking, verified writes, header format
 //   print.c    console output
 //   keyboard.c key input
 //   math.c     32 bit mul/div without runtime helpers
@@ -14,11 +15,13 @@
 //   definitions.h all tunable constants
 //
 // floppy layout (per disk):
-//   LBA 0      : header sector, see HEADER_* defines below
+//   LBA 0      : header sector, see struct FloppyHeader in floppy.h
 //   LBA 1..9   : reserved (zeros)
 //   LBA 10..2879: payload = consecutive sectors of the hdd image
 //
-// header sector layout (all multi byte values little endian):
+// header sector layout (all multi byte values little endian), as a
+// packed c struct in floppy.h so compiler and documentation cannot
+// drift apart:
 //   off    0 : magic 'HDSV'
 //   off    4 : version, currently 2
 //   off    5 : flags, bit0 = this is the last disk of the dump
@@ -73,9 +76,9 @@ static unsigned char batchFill;      /* sectors currently in batchBuf */
 
 static unsigned long diskIndex;      /* current floppy number */
 static unsigned long diskStartLBA;   /* first hdd lba on current disk */
-static unsigned short hddCylSaved;   /* position snapshot taken before */
-static unsigned char hddHeadSaved;   /* resetForDiskStart() rewinds; */
-static unsigned char hddSecSaved;    /* lets a failed disk be redone */
+static struct Chs hddPosSaved;       /* position snapshot taken before */
+                                     /* resetForDiskStart() rewinds; */
+                                     /* lets a failed disk be redone */
 static unsigned int sectorCount;     /* payload sectors written this disk */
 static unsigned int payloadCrc;      /* running crc over this disks payload */
 static unsigned char escFlag;        /* set when user pressed esc */
@@ -146,7 +149,7 @@ static void progressLine(void){
   print(" LBA:");
   printDecLong(hddLBA);
   print("/");
-  printDecLong(hddTotalSectors);
+  printDecLong(hddGeom.totalSectors);
   print(" n:");
   printDecLong(sectorCount);
   print(" bad:");
@@ -161,42 +164,48 @@ static void progressLine(void){
 
 /* fills headerBuf with the metadata sector for the current disk:
    identity, resume information, checksums and the two bad lists.
-   written to lba 0 of each floppy so the pc side knows what it got */
+   written to lba 0 of each floppy so the pc side knows what it got.
+
+   the FloppyHeader struct is mapped straight over headerBuf, so its
+   members land at their documented on-disk offsets (see floppy.h).
+   multi byte values are stored little endian implicitly because x86
+   is little endian */
 static void buildHeader(unsigned char finalFlag){
   unsigned int i;
   unsigned int hc;
+  struct FloppyHeader* h = (struct FloppyHeader*)headerBuf;
   static char* id = "HDDSAVER 2.5";
   for(i = 0; i < 512; i++){
     headerBuf[i] = 0;
   }
-  headerBuf[0] = 'H';
-  headerBuf[1] = 'D';
-  headerBuf[2] = 'S';
-  headerBuf[3] = 'V';          /* magic 'HDSV' identifies our disks */
-  headerBuf[4] = 2;            /* format version */
-  headerBuf[5] = finalFlag;    /* bit0 = last disk of the dump */
-  poke32(headerBuf + 6, diskIndex);
-  poke32(headerBuf + 10, diskStartLBA);
-  poke16(headerBuf + 14, sectorCount);
-  poke16(headerBuf + 16, payloadCrc);
-  poke16(headerBuf + 18, diskBadCount);
-  poke32(headerBuf + 20, hddTotalSectors);
-  poke16(headerBuf + 254, badFlpCount);
+  h->magic[0] = 'H';
+  h->magic[1] = 'D';
+  h->magic[2] = 'S';
+  h->magic[3] = 'V';           /* magic 'HDSV' identifies our disks */
+  h->version = 2;              /* format version */
+  h->flags = finalFlag;        /* bit0 = last disk of the dump */
+  h->diskIndex = diskIndex;
+  h->startLBA = diskStartLBA;
+  h->sectorCount = sectorCount;
+  h->payloadCrc = payloadCrc;
+  h->diskBadCount = diskBadCount;
+  h->hddTotalSectors = hddGeom.totalSectors;
+  h->badFlpCount = badFlpCount;
   /* copy the bad lbas of this disk into their header slots */
   for(i = 0; i < diskBadCount && i < MAX_BAD; i++){
-    poke32(headerBuf + 24 + i * 4, badLbasDisk[i]);
+    h->badLbas[i] = badLbasDisk[i];
   }
   /* ... and the offsets of surrendered floppy sectors */
   for(i = 0; i < badFlpCount && i < MAX_BAD_FLP; i++){
-    poke16(headerBuf + 256 + i * 2, badFlpOffsets[i]);
+    h->badFlpOffsets[i] = badFlpOffsets[i];
   }
   for(i = 0; id[i]; i++){
-    headerBuf[216 + i] = id[i];
+    h->toolId[i] = id[i];
   }
   /* checksum over the header itself (excluding the checksum slot),
      protects against a corrupted header lying about everything else */
   hc = crcBuf(0xFFFF, headerBuf, 500);
-  poke16(headerBuf + 500, hc);
+  h->crc = hc;
 }
 
 /* returns 0 = header written+verified, nonzero = header could not be
@@ -205,22 +214,17 @@ static void buildHeader(unsigned char finalFlag){
    disk, so a failed header write dooms the disk even if the payload
    is perfect */
 static unsigned char writeHeaderSector(void){
-  unsigned short cylSave;
-  unsigned char headSave;
-  unsigned char secSave;
+  struct Chs save;
   unsigned char r;
-  buildHeader(hddLBA >= hddTotalSectors ? 1 : 0);
-  /* header always goes to LBA 0, payload position is saved/restored */
-  cylSave = flpCyl;
-  headSave = flpHead;
-  secSave = flpSec;
-  flpCyl = 0;
-  flpHead = 0;
-  flpSec = 1;
+  buildHeader(hddLBA >= hddGeom.totalSectors ? 1 : 0);
+  /* header always goes to LBA 0, payload position is saved/restored.
+     assigning the whole struct copies all three fields at once */
+  save = flpPos;
+  flpPos.cyl = 0;
+  flpPos.head = 0;
+  flpPos.sec = 1;
   r = writeFloppyAuto(headerBuf, sectorCount);
-  flpCyl = cylSave;
-  flpHead = headSave;
-  flpSec = secSave;
+  flpPos = save;
   return r;
 }
 
@@ -230,18 +234,16 @@ static unsigned char writeHeaderSector(void){
    fresh disk is inserted and again after a media-failure retry -
    hence the position snapshot main() takes before each attempt */
 static void resetForDiskStart(void){
-  hddCyl = hddCylSaved;        /* back to the snapshotted hdd spot... */
-  hddHead = hddHeadSaved;
-  hddSec = hddSecSaved;
+  hddPos = hddPosSaved;        /* back to the snapshotted hdd spot... */
   hddLBA = diskStartLBA;
   sectorCount = 0;
   payloadCrc = 0xFFFF;         /* crc init value, see util.c */
   diskBadCount = 0;
   badFlpCount = 0;
   batchFill = 0;
-  flpCyl = 0;                  /* payload starts right after the */
-  flpHead = 0;                 /* reserved header area at lba 10 */
-  flpSec = HEADER_LBAS + 1;
+  flpPos.cyl = 0;              /* payload starts right after the */
+  flpPos.head = 0;             /* reserved header area at lba 10 */
+  flpPos.sec = HEADER_LBAS + 1;
   flpLBA = HEADER_LBAS;
 }
 
@@ -249,13 +251,13 @@ static void resetForDiskStart(void){
    2 = restart requested (state was rewound by caller via resetForDiskStart) */
 static unsigned char doOneDisk(void){
   unsigned char r;
-  while(hddLBA < hddTotalSectors &&
+  while(hddLBA < hddGeom.totalSectors &&
         (sectorCount + batchFill) < DISK_CAPACITY){
     if(escPressed()){
       escFlag = 1;
       break;
     }
-    if(headMask & (1 << hddHead)){
+    if(headMask & (1 << hddPos.head)){
       readHddResilient(batchBuf + batchFill * 512);
     }else{
       /* head deselected via bitmask: leave an obvious marker so a
@@ -280,7 +282,7 @@ static unsigned char doOneDisk(void){
       return r;
     }
   }
-  if(sectorCount > 0 || hddLBA >= hddTotalSectors){
+  if(sectorCount > 0 || hddLBA >= hddGeom.totalSectors){
     r = writeHeaderSector();
     if(r != 0){
       return r;
@@ -320,9 +322,9 @@ void main(void){
 
   print("\r\n\r\nHDD saver 2.5\r\n");
   print("Dumps ");
-  printDecLong(hddTotalSectors);
+  printDecLong(hddGeom.totalSectors);
   print(" hdd sectors (");
-  printDecLong(hddTotalSectors >> 11);  /* >>11 = /2048 sectors = MB */
+  printDecLong(hddGeom.totalSectors >> 11);  /* >>11 = /2048 sectors = MB */
   print(" MB) to floppies, ");
   printDecLong(DISK_CAPACITY);
   print(" sectors per disk.\r\n");
@@ -350,17 +352,17 @@ void main(void){
 
   /* every prompt shows the compiled-in default in brackets; typing
      nothing (just enter) accepts it */
-  v = decInput("Cylinders", hddCyls);
+  v = decInput("Cylinders", hddGeom.cyls);
   if(v && v <= 1024){
-    hddCyls = (unsigned int)v;
+    hddGeom.cyls = (unsigned int)v;
   }
-  v = decInput("Heads", hddHeads);
+  v = decInput("Heads", hddGeom.heads);
   if(v && v <= 255){
-    hddHeads = (unsigned char)v;
+    hddGeom.heads = (unsigned char)v;
   }
-  v = decInput("Sectors per track", hddSpt);
+  v = decInput("Sectors per track", hddGeom.spt);
   if(v && v <= 63){
-    hddSpt = (unsigned char)v;
+    hddGeom.spt = (unsigned char)v;
   }
   v = decInput("Hdd read retries", hddRetries);
   if(v <= 255){
@@ -371,22 +373,22 @@ void main(void){
   if(v){
     headMask = (unsigned char)v;
   }
-  hddTotalSectors = mulLong(mulLong(hddCyls, hddHeads), hddSpt);
+  hddGeom.totalSectors = mulLong(mulLong(hddGeom.cyls, hddGeom.heads), hddGeom.spt);
   print("Using: ");
-  printDecLong(hddCyls);
+  printDecLong(hddGeom.cyls);
   print("/");
-  printDecLong(hddHeads);
+  printDecLong(hddGeom.heads);
   print("/");
-  printDecLong(hddSpt);
+  printDecLong(hddGeom.spt);
   print(", retries ");
   printDecLong(hddRetries);
   print(", head mask ");
   printHex(headMask >> 4);
   printHex(headMask & 0x0F);
   print(", total ");
-  printDecLong(hddTotalSectors);
+  printDecLong(hddGeom.totalSectors);
   print(" sectors (");
-  printDecLong(hddTotalSectors >> 11);
+  printDecLong(hddGeom.totalSectors >> 11);
   print(" MB).\r\n");
 
   /* resuming: the lba where the previous run stopped becomes the
@@ -399,7 +401,7 @@ void main(void){
   diskIndex = decInput("Floppy disk number", diskIndex);
   print("\r\nStarting. Everything else runs by itself.\r\n");
 
-  if(startLBA >= hddTotalSectors){
+  if(startLBA >= hddGeom.totalSectors){
     print("Start LBA beyond end of drive.\r\nPower off.\r\n");
     while(1){
       _asm{ hlt };             /* hlt stops the cpu until interrupt */
@@ -413,10 +415,9 @@ void main(void){
   while(1){
     /* remember where we are on the hdd: if this floppy fails late,
        resetForDiskStart() can rewind to exactly this spot and the
-       whole content gets re-dumped onto fresh media */
-    hddCylSaved = hddCyl;
-    hddHeadSaved = hddHead;
-    hddSecSaved = hddSec;
+       whole content gets re-dumped onto fresh media. one assignment
+       copies the whole cylinder/head/sector triple */
+    hddPosSaved = hddPos;
     resetForDiskStart();
 
     print("=== Disk ");
@@ -437,7 +438,7 @@ void main(void){
       diskStartTicks = biosTicks();
     }
 
-    if(hddLBA >= hddTotalSectors){
+    if(hddLBA >= hddGeom.totalSectors){
       /* every sector of the drive has been through the pipeline */
       print("\r\n=== DUMP COMPLETE ===\r\n");
       print("Disks used: ");

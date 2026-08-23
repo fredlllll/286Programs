@@ -1,6 +1,21 @@
 #include "int13.h"
 #include "print.h"
 
+/* chs counting works exactly like a car odometer: sector 1..spt,
+   then head rolls over, then cylinder. since lba numbers sectors in
+   precisely that order, stepping also equals seeking */
+void stepChs(struct Chs* pos, const struct Geometry* geom){
+  pos->sec += 1;
+  if(pos->sec > geom->spt){       /* past last sector -> next head */
+    pos->sec = 1;                 /* sectors are numbered from 1! */
+    pos->head += 1;
+  }
+  if(pos->head >= geom->heads){   /* past last head -> next cylinder */
+    pos->head = 0;
+    pos->cyl += 1;
+  }
+}
+
 void resetDiskSystem(void){
   _asm{
     xor ax,ax          ; ah = 0 = "reset disk system", dl already

@@ -8,16 +8,11 @@
    differently (e.g. after the cmos battery died) and reads only line
    up when we use exactly the geometry the data was originally written
    with */
-unsigned int hddCyls = HDD_CYLS;
-unsigned char hddHeads = HDD_HEADS;
-unsigned char hddSpt = HDD_SPT;
-unsigned long hddTotalSectors = HDD_TOTAL_SECTORS;
+struct Geometry hddGeom = { HDD_CYLS, HDD_HEADS, HDD_SPT, HDD_TOTAL_SECTORS };
 unsigned char hddRetries = RETRY_HDD;
 unsigned char headMask = 0xFF;
 
-unsigned short hddCyl;
-unsigned char hddHead;
-unsigned char hddSec;
+struct Chs hddPos = {0, 0, 1};
 unsigned long hddLBA;
 
 unsigned long badLbasDisk[MAX_BAD];
@@ -25,28 +20,16 @@ unsigned int diskBadCount;
 unsigned long badLbasAll[MAX_BAD_ALL];
 unsigned int allBadCount;
 
-/* chs counting works exactly like a car odometer: sector 1..spt,
-   then head rolls over, then cylinder. since lba numbers sectors in
-   precisely that order, stepping also equals seeking */
-unsigned char advanceCHSHdd(void){
-  hddSec += 1;
-  if(hddSec > hddSpt){       /* past last sector -> next head */
-    hddSec = 1;              /* sectors are numbered from 1! */
-    hddHead += 1;
-  }
-  if(hddHead >= hddHeads){   /* past last head -> next cylinder */
-    hddHead = 0;
-    hddCyl += 1;
-  }
-  return hddCyl < hddCyls;
+void advanceCHSHdd(void){
+  stepChs(&hddPos, &hddGeom);
 }
 
 /* position hdd chs at lba without any 32 bit division:
    just step forward from 0/0/1, cheap enough for these drive sizes */
 void seekToLBA(unsigned long target){
-  hddCyl = 0;
-  hddHead = 0;
-  hddSec = 1;
+  hddPos.cyl = 0;
+  hddPos.head = 0;
+  hddPos.sec = 1;
   while(target){
     advanceCHSHdd();
     target--;
@@ -68,13 +51,13 @@ void readHddResilient(unsigned char* dest){
   unsigned char tries;
   unsigned char status;
 
-  status = readFromDrive(1, hddCyl, hddHead, hddSec, 0x80, dest);
+  status = readFromDrive(1, hddPos.cyl, hddPos.head, hddPos.sec, 0x80, dest);
   tries = 0;
   while(status != 0 && status != 0x11 && tries < hddRetries){
     if(hddRetries >= 2 && tries == hddRetries / 2){
       resetDiskSystem();     /* halfway through, try with a reset */
     }
-    status = readFromDrive(1, hddCyl, hddHead, hddSec, 0x80, dest);
+    status = readFromDrive(1, hddPos.cyl, hddPos.head, hddPos.sec, 0x80, dest);
     tries++;
   }
   if(status != 0 && status != 0x11 && hddRetries > 0){
@@ -86,11 +69,11 @@ void readHddResilient(unsigned char* dest){
   }
 
   print("\r\nHDD read fail CHS ");
-  printDecLong(hddCyl);
+  printDecLong(hddPos.cyl);
   printChar('/', 1);
-  printDecLong(hddHead);
+  printDecLong(hddPos.head);
   printChar('/', 1);
-  printDecLong(hddSec);
+  printDecLong(hddPos.sec);
   print(" LBA ");
   printDecLong(hddLBA);
   print(": ");
