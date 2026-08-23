@@ -34,8 +34,13 @@
 // note: no 32 bit division/multiplication anywhere, watcom would emit
 // calls to runtime helpers (__U4D etc.) which we dont link against.
 // 32 bit add/sub/cmp/constant-shift is fine, it compiles inline.
+// see math.c for the shift-add helpers that stand in for them
 
 #include "math.h"
+#include "print.h"
+#include "keyboard.h"
+#include "int13.h"
+#include "util.h"
 
 #define HDD_CYLS 820
 #define HDD_HEADS 6
@@ -69,246 +74,6 @@ unsigned long hddTotalSectors = HDD_TOTAL_SECTORS;
 unsigned char hddRetries = RETRY_HDD;   /* 0 = one attempt, no resets */
 unsigned char headMask = 0xFF;          /* bit N = dump head N */
 
-void printChar (unsigned char inChar, unsigned short pageAndColor);
-#pragma aux printChar = \
-    "mov ah, 0x0e"   \
-    "int 0x10"       \
-    modify [ah]      \
-    parm   [al][bx]
-
-void print(const char* text){
-  char ch;
-  while (ch = *text++){
-    printChar(ch, 1);
-  }
-}
-
-static char* hexAlphabet = "0123456789ABCDEF";
-
-void printHex(unsigned char value){
-  char ch = hexAlphabet[value >> 4];
-  printChar(ch, 1);
-  ch = hexAlphabet[value & 0x0F];
-  printChar(ch, 1);
-}
-void printHexShort(unsigned short value){
-  printHex(value >> 8);
-  printHex(value & 0xFF);
-}
-void printHexLong(unsigned long value){
-  printHexShort(value >> 16);
-  printHexShort(value & 0xFFFF);
-}
-
-static unsigned long pow10[10] = {1ul,10ul,100ul,1000ul,10000ul,100000ul,
-                                  1000000ul,10000000ul,100000000ul,1000000000ul};
-
-void printDecLong(unsigned long v){
-  char c;
-  unsigned char i;
-  unsigned char started;
-  started = 0;
-  for(i = 9;; i--){
-    c = '0';
-    while(v >= pow10[i]){
-      v -= pow10[i];
-      c++;
-    }
-    if(c > '0' || started || i == 0){
-      printChar(c, 1);
-      started = 1;
-    }
-    if(i == 0){
-      break;
-    }
-  }
-}
-
-unsigned char getNextKeyPress(){
-  volatile unsigned char result;
-  _asm{
-    mov ah, 0
-    int 0x16
-    mov result, al
-  };
-  return result;
-}
-
-volatile unsigned char keyFlags;
-
-unsigned char escPressed(){
-  /* non blocking: bios AH=01 sets ZF when no key waiting, LAHF grabs it */
-  unsigned char k;
-  _asm{
-    mov ah, 1
-    int 0x16
-    lahf
-    mov keyFlags, ah
-  };
-  if(keyFlags & 0x40){
-    return 0;
-  }
-  k = getNextKeyPress();
-  return (k == 27) ? 1 : 0;
-}
-
-void waitForEnter(char* prompt){
-  print(prompt);
-  while(1){
-    if(getNextKeyPress() == 0x0D){
-      return;
-    }
-  }
-}
-
-void resetDiskSystem(){
-  _asm{
-    xor ax,ax
-    int 0x13
-  };
-}
-
-/* INT13 AH=08: what the bios itself thinks the drive looks like.
-   ES:DI must be writable, some xt-class bioses copy a parameter table
-   there. results are max indices except sectors-per-track */
-unsigned char prmTable[16];
-volatile unsigned char biosCylLo;
-volatile unsigned char biosCylHiSec;
-volatile unsigned char biosHeadMax;
-
-void queryBiosDrive(void){
-  unsigned short diOff = (unsigned short)(unsigned int)prmTable;
-  _asm{
-    mov ah, 0x08
-    mov dl, 0x80
-    mov di, diOff
-    push ds
-    pop es
-    int 0x13
-    mov biosCylLo, ch
-    mov biosCylHiSec, cl
-    mov biosHeadMax, dh
-  };
-}
-
-unsigned char readFromDrive(unsigned char numSectorsToRead, unsigned short cylinder, unsigned char head, unsigned char sector, unsigned char driveNumber, void* destination){
-  volatile unsigned char status;
-  unsigned short myCx = (cylinder << 8) | ((cylinder>>2)& 0xC0) | sector;
-  _asm {
-    mov ah, 0x2
-    mov al, numSectorsToRead
-    mov cx, myCx
-    mov dh, head
-    mov dl, driveNumber
-    mov bx, destination
-    int 0x13
-    mov status, ah
-  };
-  return status;
-}
-
-unsigned char writeToDrive(unsigned char numSectorsToWrite, unsigned short cylinder, unsigned char head, unsigned char sector, unsigned char driveNumber, void* source){
-  volatile unsigned char status;
-  unsigned short myCx = (cylinder << 8) | ((cylinder>>2)& 0xC0) | sector;
-  _asm {
-    mov ah, 0x3
-    mov al, numSectorsToWrite
-    mov cx, myCx
-    mov dh, head
-    mov dl, driveNumber
-    mov bx, source
-    int 0x13
-    mov status, ah
-  };
-  return status;
-}
-
-void printInt13Status(unsigned char status){
-  switch(status){
-    case 0x00:
-      print("no error");
-      break;
-    case 0x01:
-      print("bad command passed to driver");
-      break;
-    case 0x02:
-      print("address mark not found or bad sector");
-      break;
-    case 0x03:
-      print("diskette write protect error");
-      break;
-    case 0x04:
-      print("sector not found");
-      break;
-    case 0x05:
-      print("fixed disk reset failed");
-      break;
-    case 0x06:
-      print("diskette changed or removed");
-      break;
-    case 0x07:
-      print("bad fixed disk parameter table");
-      break;
-    case 0x08:
-      print("DMA overrun");
-      break;
-    case 0x09:
-      print("DMA access across 64k boundary");
-      break;
-    case 0x0a:
-      print("bad fixed disk sector flag");
-      break;
-    case 0x0b:
-      print("bad fixed disk cylinder");
-      break;
-    case 0x0c:
-      print("unsupported track/invalid media");
-      break;
-    case 0x0d:
-      print("invalid number of sectors on fixed disk format");
-      break;
-    case 0x0e:
-      print("fixed disk controller data address mark detected");
-      break;
-    case 0x0f:
-      print("fixed disk DMA arbitration level out of range");
-      break;
-    case 0x10:
-      print("ECC error on disk read, data bad");
-      break;
-    case 0x11:
-      print("data recovered by ECC");
-      break;
-    case 0x20:
-      print("controller error");
-      break;
-    case 0x40:
-      print("seek failure");
-      break;
-    case 0x80:
-      print("time out, drive not ready");
-      break;
-    case 0xAA:
-      print("fixed disk drive not ready");
-      break;
-    case 0xBB:
-      print("fixed disk undefined error");
-      break;
-    case 0xCC:
-      print("fixed disk write fault on selected drive");
-      break;
-    case 0xE0:
-      print("fixed disk status error");
-      break;
-    case 0xFF:
-      print("sense operation failed");
-      break;
-    default:
-      print("unknown error ");
-      printHex(status);
-  }
-}
-
 /* ------------------------- buffers, declared first so they sit low */
 
 static unsigned char batchBuf[BATCH_SECTORS*512];
@@ -317,7 +82,6 @@ static unsigned char headerBuf[512];
 static unsigned long badLbasDisk[MAX_BAD];
 static unsigned long badLbasAll[MAX_BAD_ALL];
 static unsigned int badFlpOffsets[MAX_BAD_FLP];
-static unsigned int crcTable[256];
 
 /* ------------------------- state */
 
@@ -345,119 +109,6 @@ static unsigned char batchFill;
 static unsigned char escFlag;
 static unsigned long diskStartTicks;
 
-static char* badFillText = "!BAD-SECTOR!";
-static char* skipFillText = "!HEAD-SKIP!..";
-
-/* ------------------------- small helpers */
-
-unsigned char memcmpBuf(unsigned char* a, unsigned char* b){
-  unsigned int i;
-  for(i = 0; i < 512; i++){
-    if(a[i] != b[i]){
-      return 1;
-    }
-  }
-  return 0;
-}
-
-void fillBadPattern(unsigned char* dest){
-  unsigned int i;
-  for(i = 0; i < 512; i++){
-    dest[i] = badFillText[i % 12];
-  }
-}
-
-/* marks payload slots of sectors whose head is not selected in the
-   head bitmask: not read at all, not logged as bad, and the pc side
-   leaves the lba uncovered so another pass can fill it in */
-void fillSkipPattern(unsigned char* dest){
-  unsigned int i;
-  for(i = 0; i < 512; i++){
-    dest[i] = skipFillText[i % 13];
-  }
-}
-
-void poke16(unsigned char* p, unsigned int v){
-  p[0] = (unsigned char)v;
-  p[1] = (unsigned char)(v >> 8);
-}
-
-void poke32(unsigned char* p, unsigned long v){
-  p[0] = (unsigned char)v;
-  p[1] = (unsigned char)(v >> 8);
-  p[2] = (unsigned char)(v >> 16);
-  p[3] = (unsigned char)(v >> 24);
-}
-
-void crcInit(void){
-  unsigned int i;
-  unsigned int j;
-  unsigned int c;
-  for(i = 0; i < 256; i++){
-    c = i << 8;
-    for(j = 0; j < 8; j++){
-      if(c & 0x8000){
-        c = (c << 1) ^ 0x1021;
-      }else{
-        c = c << 1;
-      }
-    }
-    crcTable[i] = c;
-  }
-}
-
-unsigned int crcBuf(unsigned int crc, unsigned char* p, unsigned int n){
-  while(n--){
-    crc = (crc << 8) ^ crcTable[((crc >> 8) ^ *p++) & 0xFF];
-  }
-  return crc;
-}
-
-/* decimal input: digits appended with echo, backspace edits,
-   enter submits, empty input returns default */
-unsigned long decInput(char* prompt, unsigned long defVal){
-  char buf[11];
-  unsigned char len;
-  unsigned char k;
-  unsigned char i;
-  unsigned long v;
-  len = 0;
-  print(prompt);
-  print(" [");
-  printDecLong(defVal);
-  print("]: ");
-  while(1){
-    k = getNextKeyPress();
-    if(k == 0x0D){
-      if(len == 0){
-        print("\r\n");
-        return defVal;
-      }
-      buf[len] = 0;
-      v = 0;
-      for(i = 0; i < len; i++){
-        v = (v << 3) + (v << 1) + (buf[i] - '0');
-      }
-      print("\r\n");
-      return v;
-    }
-    if(k == 0x08){
-      if(len){
-        len--;
-        printChar(0x08, 1);
-        printChar(' ', 1);
-        printChar(0x08, 1);
-      }
-    }
-    if(k >= '0' && k <= '9'){
-      if(len < 10){
-        buf[len++] = k;
-        printChar(k, 1);
-      }
-    }
-  }
-}
-
 unsigned long divByDiskCapacity(unsigned long v, unsigned long* remainder){
   unsigned long n;
   n = 0;
@@ -468,8 +119,6 @@ unsigned long divByDiskCapacity(unsigned long v, unsigned long* remainder){
   *remainder = v;
   return n;
 }
-
-
 
 /* bios data area tick counter at 0040:006C, incremented 18.206 times
    per second by the timer interrupt. independent of the cmos battery */
