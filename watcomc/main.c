@@ -64,6 +64,8 @@ unsigned int hddCyls = HDD_CYLS;
 unsigned char hddHeads = HDD_HEADS;
 unsigned char hddSpt = HDD_SPT;
 unsigned long hddTotalSectors = HDD_TOTAL_SECTORS;
+unsigned char hddRetries = RETRY_HDD;   /* 0 = one attempt, no resets */
+unsigned char headMask = 0xFF;          /* bit N = dump head N */
 
 void printChar (unsigned char inChar, unsigned short pageAndColor);
 #pragma aux printChar = \
@@ -342,6 +344,7 @@ static unsigned char escFlag;
 static unsigned long diskStartTicks;
 
 static char* badFillText = "!BAD-SECTOR!";
+static char* skipFillText = "!HEAD-SKIP!..";
 
 /* ------------------------- small helpers */
 
@@ -359,6 +362,16 @@ void fillBadPattern(unsigned char* dest){
   unsigned int i;
   for(i = 0; i < 512; i++){
     dest[i] = badFillText[i % 12];
+  }
+}
+
+/* marks payload slots of sectors whose head is not selected in the
+   head bitmask: not read at all, not logged as bad, and the pc side
+   leaves the lba uncovered so another pass can fill it in */
+void fillSkipPattern(unsigned char* dest){
+  unsigned int i;
+  for(i = 0; i < 512; i++){
+    dest[i] = skipFillText[i % 13];
   }
 }
 
@@ -580,26 +593,24 @@ void seekToLBA(unsigned long target){
 
 /* ------------------------- hdd reading */
 
-/* retries RETRY_HDD times, then fills dest with BADFILL and logs the LBA.
-   never prompts, copying always continues.
-   NOTE: plain immediate re-reads first. calling the bios disk reset
-   between every attempt would recalibrate the drive (loud seek to
-   cylinder 0 and back) on every retry, so it is only done once midway
-   and once after giving up, in case the controller got wedged */
+/* reads one hdd sector. retries up to hddRetries times (configurable,
+   0 = single attempt). resets only kick in when retrying is enabled:
+   a bios disk reset recalibrates the drive (loud seek to cylinder 0
+   and back), which we avoid on a drive with weak heads */
 void readHddResilient(unsigned char* dest){
   unsigned char tries;
   unsigned char status;
 
   status = readFromDrive(1, hddCyl, hddHead, hddSec, 0x80, dest);
   tries = 0;
-  while(status != 0 && status != 0x11 && tries < RETRY_HDD){
-    if(tries == RETRY_HDD / 2){
+  while(status != 0 && status != 0x11 && tries < hddRetries){
+    if(hddRetries >= 2 && tries == hddRetries / 2){
       resetDiskSystem();
     }
     status = readFromDrive(1, hddCyl, hddHead, hddSec, 0x80, dest);
     tries++;
   }
-  if(status != 0 && status != 0x11){
+  if(status != 0 && status != 0x11 && hddRetries > 0){
     resetDiskSystem();
   }
   if(status == 0 || status == 0x11){
@@ -716,7 +727,7 @@ void progressLine(void){
 void buildHeader(unsigned char finalFlag){
   unsigned int i;
   unsigned int hc;
-  static char* id = "HDDSAVER 2.3";
+  static char* id = "HDDSAVER 2.5";
   for(i = 0; i < 512; i++){
     headerBuf[i] = 0;
   }
@@ -796,7 +807,11 @@ unsigned char doOneDisk(void){
       escFlag = 1;
       break;
     }
-    readHddResilient(batchBuf + batchFill * 512);
+    if(headMask & (1 << hddHead)){
+      readHddResilient(batchBuf + batchFill * 512);
+    }else{
+      fillSkipPattern(batchBuf + batchFill * 512);
+    }
     advanceCHSHdd();
     hddLBA++;
     batchFill++;
@@ -849,7 +864,7 @@ void main(void){
 
   crcInit();
 
-  print("\r\n\r\nHDD saver 2.3\r\n");
+  print("\r\n\r\nHDD saver 2.5\r\n");
   print("Dumps ");
   printDecLong(hddTotalSectors);
   print(" hdd sectors (");
@@ -888,6 +903,15 @@ void main(void){
   if(v && v <= 63){
     hddSpt = (unsigned char)v;
   }
+  v = decInput("Hdd read retries", hddRetries);
+  if(v <= 255){
+    hddRetries = (unsigned char)v;
+  }
+  print("Head select: decimal bitmask, bit N = head N.\r\n");
+  v = decInput("Head bitmask", 0xFF);
+  if(v){
+    headMask = (unsigned char)v;
+  }
   hddTotalSectors = mulLong(mulLong(hddCyls, hddHeads), hddSpt);
   print("Using: ");
   printDecLong(hddCyls);
@@ -895,6 +919,11 @@ void main(void){
   printDecLong(hddHeads);
   print("/");
   printDecLong(hddSpt);
+  print(", retries ");
+  printDecLong(hddRetries);
+  print(", head mask ");
+  printHex(headMask >> 4);
+  printHex(headMask & 0x0F);
   print(", total ");
   printDecLong(hddTotalSectors);
   print(" sectors (");
@@ -976,6 +1005,10 @@ void main(void){
         _asm{ hlt };
       }
     }
+
+    /* anchor the next disk at the position this one reached;
+       resetForDiskStart() rewinds hddLBA here between disks */
+    diskStartLBA = hddLBA;
 
     waitForEnter("Swap in NEXT blank disk, then press Enter");
     diskIndex++;
