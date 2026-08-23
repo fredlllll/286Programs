@@ -22,13 +22,14 @@ def list_sources():
 def compile_source(name):
     src = os.path.join(SOURCE_DIR, name+".c")
     obj = os.path.join(OBJ_DIR, name+".obj")
-    result = os.system("wcc "+WCC_FLAGS+" -fo="+obj+" "+src)
+    err = os.path.join(OBJ_DIR, name+".err")
+    result = os.system("wcc "+WCC_FLAGS+" -fo="+obj+" -fr="+err+" "+src)
     if result != 0:
         sys.exit("\r\nfailed to compile "+src)
 
 def link_main(names):
     objs = ",".join(os.path.join(OBJ_DIR, n+".obj") for n in names)
-    result = os.system("wlink file "+objs+" format raw bin name main.bin option NODEFAULTLIBS,verbose,start=main_,OFFSET=0x7E00 order clname CODE SEGMENT start_segment")
+    result = os.system("wlink file "+objs+" format raw bin name "+os.path.join(OBJ_DIR,"main.bin")+" option NODEFAULTLIBS,verbose,start=main_,OFFSET=0x7E00 order clname CODE SEGMENT start_segment")
     if result != 0:
         sys.exit("\r\nfailed to link main.bin")
 
@@ -49,12 +50,13 @@ def process_sources():
     link_main(names)
 
 def process_bootloader():
-    silent_remove("bootloader.tmp.obj")
+    silent_remove(os.path.join(OBJ_DIR,"bootloader.tmp.obj"))
+    silent_remove(os.path.join(OBJ_DIR,"bootloader.tmp.err"))
     #modify bootloader code
     with open("bootloader.c", 'r') as f:
         bootloader_code = f.read()
 
-    with open("main.bin", 'rb') as f:
+    with open(os.path.join(OBJ_DIR,"main.bin"), 'rb') as f:
         main = f.read()
     main_sectors = len(main) // 512 +1
     print(f"\r\nmain uses {main_sectors} sectors\r\n")
@@ -64,15 +66,17 @@ def process_bootloader():
         f.write(bootloader_code)
 
     obj = os.path.join(OBJ_DIR, "bootloader.tmp.obj")
-    result = os.system("wcc "+WCC_FLAGS+" -fo="+obj+" bootloader.tmp.c")
+    err = os.path.join(OBJ_DIR, "bootloader.tmp.err")
+    result = os.system("wcc "+WCC_FLAGS+" -fo="+obj+" -fr="+err+" bootloader.tmp.c")
     os.remove("bootloader.tmp.c")
     if result != 0:
         sys.exit("\r\nfailed to compile bootloader.c")
-    result = os.system("wlink file "+obj+" format raw bin name bootloader.bin option NODEFAULTLIBS,verbose,start=init_,OFFSET=0x7C00")
+    binfile = os.path.join(OBJ_DIR, "bootloader.bin")
+    result = os.system("wlink file "+obj+" format raw bin name "+binfile+" option NODEFAULTLIBS,verbose,start=init_,OFFSET=0x7C00")
     if result != 0:
         sys.exit("\r\nfailed to link bootloader.obj")
 
-    with open('bootloader.bin','rb') as f:
+    with open(binfile,'rb') as f:
         bootloader = f.read()
 
     signature = 0x55AA.to_bytes(2,'big')
