@@ -1,3 +1,5 @@
+#include "math.h"
+
 /* 32x16 bit multiply without the watcom runtime helper (__U4M):
    plain shift-add, called once at startup so speed is irrelevant */
 unsigned long mulLong(unsigned long a, unsigned int b){

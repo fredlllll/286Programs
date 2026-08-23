@@ -35,6 +35,8 @@
 // calls to runtime helpers (__U4D etc.) which we dont link against.
 // 32 bit add/sub/cmp/constant-shift is fine, it compiles inline.
 
+#include "math.h"
+
 #define HDD_CYLS 820
 #define HDD_HEADS 6
 #define HDD_SPT 26
