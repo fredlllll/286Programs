@@ -339,6 +339,7 @@ static unsigned int badFlpCount;
 static unsigned int allBadCount;
 static unsigned char batchFill;
 static unsigned char escFlag;
+static unsigned long diskStartTicks;
 
 static char* badFillText = "!BAD-SECTOR!";
 
@@ -466,6 +467,78 @@ unsigned long mulLong(unsigned long a, unsigned int b){
     b >>= 1;
   }
   return r;
+}
+
+/* 32/16 bit binary long division without the watcom __U4D helper */
+unsigned long divLong(unsigned long num, unsigned int den){
+  unsigned long q;
+  unsigned long rem;
+  unsigned int i;
+  q = 0;
+  rem = 0;
+  for(i = 0; i < 32; i++){
+    rem <<= 1;
+    if(num & 0x80000000UL){
+      rem |= 1;
+    }
+    num <<= 1;
+    q <<= 1;
+    if(rem >= (unsigned long)den){
+      rem -= den;
+      q |= 1;
+    }
+  }
+  return q;
+}
+
+/* bios data area tick counter at 0040:006C, incremented 18.206 times
+   per second by the timer interrupt. independent of the cmos battery */
+unsigned long biosTicks(void){
+  volatile unsigned short lo;
+  volatile unsigned short hi;
+  _asm{
+    push es
+    mov ax, 0x0040
+    mov es, ax
+    xor bx, bx
+    mov ax, es:[bx+0x6C]
+    mov lo, ax
+    mov ax, es:[bx+0x6E]
+    mov hi, ax
+    pop es
+  };
+  return ((unsigned long)hi << 16) | lo;
+}
+
+/* append estimated time until this disk finishes, based on pace so far.
+   stays in tick units as long as possible; minutes extracted by
+   subtraction (1092 ticks ~= 60 s), seconds by native 16-bit division */
+void printEta(unsigned long elapsedTicks, unsigned int done){
+  unsigned long totalT;
+  unsigned long remainT;
+  unsigned long m;
+  unsigned int s;
+  if(done == 0){
+    return;
+  }
+  totalT = divLong(mulLong(elapsedTicks, DISK_CAPACITY), done);
+  if(totalT <= elapsedTicks){
+    return;
+  }
+  remainT = totalT - elapsedTicks;
+  m = 0;
+  while(remainT >= 1092){
+    remainT -= 1092;
+    m++;
+  }
+  s = (unsigned int)remainT / 18;
+  print(" eta ");
+  printDecLong(m);
+  printChar(':', 1);
+  if(s < 10){
+    printChar('0', 1);
+  }
+  printDecLong(s);
 }
 
 unsigned char advanceCHSHdd(void){
@@ -621,6 +694,7 @@ unsigned char flushBatch(void){
 }
 
 void progressLine(void){
+  unsigned long now;
   print("\r\nD:");
   printDecLong(diskIndex);
   print(" LBA:");
@@ -631,6 +705,10 @@ void progressLine(void){
   printDecLong(sectorCount);
   print(" bad:");
   printDecLong(diskBadCount);
+  now = biosTicks();
+  if(now >= diskStartTicks){
+    printEta(now - diskStartTicks, sectorCount + batchFill);
+  }
 }
 
 /* ------------------------- header handling */
@@ -638,7 +716,7 @@ void progressLine(void){
 void buildHeader(unsigned char finalFlag){
   unsigned int i;
   unsigned int hc;
-  static char* id = "HDDSAVER 2.2";
+  static char* id = "HDDSAVER 2.3";
   for(i = 0; i < 512; i++){
     headerBuf[i] = 0;
   }
@@ -675,7 +753,7 @@ unsigned char writeHeaderSector(void){
   unsigned char headSave;
   unsigned char secSave;
   unsigned char r;
-  buildHeader(hddLBA >= HDD_TOTAL_SECTORS ? 1 : 0);
+  buildHeader(hddLBA >= hddTotalSectors ? 1 : 0);
   /* header always goes to LBA 0, payload position is saved/restored */
   cylSave = flpCyl;
   headSave = flpHead;
@@ -771,7 +849,7 @@ void main(void){
 
   crcInit();
 
-  print("\r\n\r\nHDD saver 2.2\r\n");
+  print("\r\n\r\nHDD saver 2.3\r\n");
   print("Dumps ");
   printDecLong(hddTotalSectors);
   print(" hdd sectors (");
@@ -830,7 +908,7 @@ void main(void){
   diskIndex = decInput("Floppy disk number", diskIndex);
   print("\r\nStarting. Everything else runs by itself.\r\n");
 
-  if(startLBA >= HDD_TOTAL_SECTORS){
+  if(startLBA >= hddTotalSectors){
     print("Start LBA beyond end of drive.\r\nPower off.\r\n");
     while(1){
       _asm{ hlt };
@@ -851,6 +929,7 @@ void main(void){
     printDecLong(diskIndex);
     print(": insert disk and press Enter ===\r\n");
     waitForEnter("");
+    diskStartTicks = biosTicks();
 
     while(doOneDisk() == 2){
       print("This floppy media is failing too often.\r\n");
@@ -859,6 +938,7 @@ void main(void){
       print(", insert it and press Enter ===\r\n");
       waitForEnter("");
       resetForDiskStart();
+      diskStartTicks = biosTicks();
     }
 
     if(hddLBA >= hddTotalSectors){
