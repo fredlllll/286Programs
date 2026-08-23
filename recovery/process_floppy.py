@@ -706,6 +706,121 @@ def cmd_verify(args):
     sys.exit(1 if bad else 0)
 
 
+# ------------------------------------------------------------ bad sector map
+
+MAP_COLORS = {
+    0: '#bdbdbd',   # never dumped
+    1: '#2ea44f',   # readable
+    2: '#d93025',   # hdd read failed -> BADFILL
+    3: '#e08a00',   # hdd read ok, floppy write failed -> recoverable by rerun
+}
+MAP_NAMES = {0: 'not dumped', 1: 'readable', 2: 'hdd read failed',
+             3: 'floppy write failed'}
+
+
+def build_badmap_state(dumps_dir, cyls, heads, spt):
+    """Per-LBA state byte + counters, from the best dump of each disk."""
+    candidates, rejected, totals = load_dumps(dumps_dir)
+    total = cyls * heads * spt
+    state = bytearray(total)          # 0 = untouched
+    chosen = []
+    for idx in sorted(candidates):
+        recs = sorted(candidates[idx],
+                      key=lambda r: (not r['ev']['crc_ok'], r['file']))
+        chosen.append(recs[0])
+    for rec in chosen:
+        info = rec['ev']['info']
+        s, c = info['start_lba'], info['count']
+        if s >= total:
+            continue
+        for j in range(min(c, total - s)):
+            state[s + j] = 1
+    nh = nf = 0
+    for rec in chosen:
+        info = rec['ev']['info']
+        for b in info['bad_hdd']:
+            if b < total:
+                state[b] = 2
+                nh += 1
+        for off in info['bad_flp']:
+            lba = info['start_lba'] + off
+            if 0 <= lba < total:
+                state[lba] = 3
+                nf += 1
+    return state, nh, nf, len(chosen)
+
+
+def cmd_badmap(args):
+    C, H, S = args.cyls, args.heads, args.spt
+    state, nh, nf, ndisks = build_badmap_state(args.dumps, C, H, S)
+    CW, CH = 3, 12                    # pixel size of one sector cell
+    ML, MT = 56, 78                   # left margin / top offset
+    panel_gap, tick_h = 18, 14
+    W = ML + C * CW + 14
+    panel_h = S * CH + tick_h
+    Ht = MT + H * (panel_h + panel_gap)
+
+    out = ['<?xml version="1.0" encoding="UTF-8"?>',
+           '<svg xmlns="http://www.w3.org/2000/svg" width="%d" '
+           'height="%d" font-family="monospace">' % (W, Ht),
+           '<rect width="100%%" height="100%%" fill="#fafafa"/>',
+           '<text x="%d" y="24" font-size="15">Tandon HDD bad-sector map '
+           '(from %d floppies)</text>' % (ML, ndisks)]
+    lx = ML
+    for st in (1, 2, 3, 0):
+        out.append('<rect x="%d" y="36" width="12" height="12" fill="%s"/>'
+                   % (lx, MAP_COLORS[st]))
+        out.append('<text x="%d" y="46" font-size="11" fill="#222">%s</text>'
+                   % (lx + 16, MAP_NAMES[st]))
+        lx += 16 + len(MAP_NAMES[st]) * 7 + 20
+    cnt = [state.count(i) for i in range(4)]
+    out.append('<text x="%d" y="66" font-size="11" fill="#222">'
+               '%d readable | %d hdd-bad | %d flp-bad | %d not dumped'
+               '</text>' % (ML, cnt[1], cnt[2], cnt[3], cnt[0]))
+
+    for h in range(H):
+        y0 = MT + h * (panel_h + panel_gap)
+        out.append('<text x="%d" y="%d" font-size="12" fill="#222">'
+                   'Head %d</text>' % (ML, y0 + 10, h))
+        gy = y0 + 16
+        for c in range(0, C + 1, 100):
+            out.append('<line x1="%d" y1="%d" x2="%d" y2="%d" '
+                       'stroke="#dddddd"/>' % (ML + c * CW, gy,
+                                               ML + c * CW, gy + S * CH))
+        for sec in range(S):
+            ry = gy + sec * CH
+            x = 0
+            while x < C:
+                st = state[(x * H + h) * S + sec]
+                x2 = x + 1
+                while x2 < C and state[(x2 * H + h) * S + sec] == st:
+                    x2 += 1
+                out.append('<rect x="%d" y="%d" width="%d" height="%d" '
+                           'fill="%s"/>' % (ML + x * CW, ry, (x2 - x) * CW,
+                                            CH, MAP_COLORS[st]))
+                x = x2
+        for c in range(0, C, 100):
+            out.append('<text x="%d" y="%d" font-size="9" fill="#666">%d'
+                       '</text>' % (ML + c * CW, gy + S * CH + 11, c))
+
+    out.append('</svg>')
+    with open(args.out, 'w') as f:
+        f.write('\n'.join(out))
+    print('wrote %s' % args.out)
+    per = [[0, 0, 0, 0] for _ in range(H)]
+    for lba, st in enumerate(state):
+        per[(lba // S) % H][st] += 1
+    print('per head:  ok / hdd-bad / flp-bad / not-dumped')
+    for h in range(H):
+        p = per[h]
+        print('  head %d: %6d / %5d / %5d / %6d'
+              % (h, p[1], p[2], p[3], p[0]))
+    if nh or nf:
+        print('\nreading tip: failure runs ending right before multiples '
+              'of %d (track boundaries)\nlook like format-time defect '
+              'sparing, random scatter looks like decay.' % S)
+
+
 # --------------------------------------------------------------------- cli
 
 
@@ -742,6 +857,15 @@ def main():
     p.add_argument('--dumps', default='dumps')
     p.add_argument('--total', type=int, default=127920)
     p.set_defaults(fn=cmd_verify)
+
+    p = sub.add_parser('badmap',
+                       help='svg graphic: per-head good/bad sector map')
+    p.add_argument('--dumps', default='dumps')
+    p.add_argument('--out', default='badmap.svg')
+    p.add_argument('--cyls', type=int, default=820)
+    p.add_argument('--heads', type=int, default=6)
+    p.add_argument('--spt', type=int, default=26)
+    p.set_defaults(fn=cmd_badmap)
 
     args = ap.parse_args()
     args.fn(args)
