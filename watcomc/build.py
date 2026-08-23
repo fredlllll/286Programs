@@ -1,3 +1,15 @@
+# build script for the hdd saver boot floppy.
+#
+# pipeline:
+#   source/*.c  --wcc-->  obj/*.obj  --wlink-->  obj/main.bin
+#   (raw binary image loaded at 0x7E00 by the bootloader)
+#
+#   bootloader.c --patch %%num_sectors%%--wcc--> obj/bootloader.tmp.obj
+#                --wlink--> obj/bootloader.bin (loaded at 0x7C00)
+#
+#   bootloader.bin + main.bin (padded) -> output.img, a raw 1.44mb
+#   floppy image ready to write to a disk with rawritewin/imagedisk/etc.
+
 import os
 import sys
 
@@ -5,6 +17,14 @@ SOURCE_DIR = "source"
 OBJ_DIR = "obj"
 
 WCC_FLAGS = "-2 -d0 -wx -ms -s -zl -i="+SOURCE_DIR
+# compiler flags:
+#   -2   : generate 286 code (the target machine)
+#   -d0  : no debug info
+#   -wx  : maximum warning level
+#   -ms  : small memory model (one code + one data segment)
+#   -s   : remove stack overflow checks (we manage ss:sp ourselves)
+#   -zl  : remove library references -> freestanding, no runtime
+#   -i=  : include path for headers
 
 def silent_remove(filename):
     try:
@@ -12,6 +32,9 @@ def silent_remove(filename):
     except:
         pass
 
+# every .c in source/ becomes an object file and gets linked together,
+# so new modules are picked up automatically. main.c must exist since
+# it provides main() / the entry point.
 def list_sources():
     names = []
     for f in os.listdir(SOURCE_DIR):
@@ -27,6 +50,13 @@ def compile_source(name):
     if result != 0:
         sys.exit("\r\nfailed to compile "+src)
 
+# links ALL objects into one flat binary.
+#   format raw bin      : plain bytes, no exe header
+#   start=main_         : emitted image begins at main() ...
+#   OFFSET=0x7E00       : ... which the loader places at address 0x7E00,
+#                         exactly where the bootloader jumps to
+#   NODEFAULTLIBS       : freestanding, no c runtime
+#   order ...           : segment placement; keeps main's segment first
 def link_main(names):
     objs = ",".join(os.path.join(OBJ_DIR, n+".obj") for n in names)
     result = os.system("wlink file "+objs+" format raw bin name "+os.path.join(OBJ_DIR,"main.bin")+" option NODEFAULTLIBS,verbose,start=main_,OFFSET=0x7E00 order clname CODE SEGMENT start_segment")
@@ -49,6 +79,10 @@ def process_sources():
         compile_source(n)
     link_main(names)
 
+# the bootloader needs to know how many sectors to load at boot time -
+# but that number is only known after main.bin was built! solved by
+# text substitution: %%num_sectors%% in bootloader.c is replaced with
+# the real count before compiling.
 def process_bootloader():
     silent_remove(os.path.join(OBJ_DIR,"bootloader.tmp.obj"))
     silent_remove(os.path.join(OBJ_DIR,"bootloader.tmp.err"))
@@ -58,6 +92,8 @@ def process_bootloader():
 
     with open(os.path.join(OBJ_DIR,"main.bin"), 'rb') as f:
         main = f.read()
+
+    # sectors needed by main.bin (rounded up), starting at sector 2
     main_sectors = len(main) // 512 +1
     print(f"\r\nmain uses {main_sectors} sectors\r\n")
 
@@ -71,6 +107,9 @@ def process_bootloader():
     os.remove("bootloader.tmp.c")
     if result != 0:
         sys.exit("\r\nfailed to compile bootloader.c")
+
+    # same raw binary trick as main.bin but at 0x7C00, where the bios
+    # drops the first sector of a boot floppy
     binfile = os.path.join(OBJ_DIR, "bootloader.bin")
     result = os.system("wlink file "+obj+" format raw bin name "+binfile+" option NODEFAULTLIBS,verbose,start=init_,OFFSET=0x7C00")
     if result != 0:
@@ -79,9 +118,14 @@ def process_bootloader():
     with open(binfile,'rb') as f:
         bootloader = f.read()
 
+    # a boot sector MUST end with the magic signature 55 AA in its
+    # last two bytes, or the bios refuses to boot it: pad the code
+    # out to byte 510 and append it
     signature = 0x55AA.to_bytes(2,'big')
     bootloader = bootloader.ljust(510, b'\0') +signature
 
+    # pad main.bin so the final image has exactly full-floppy size:
+    # 2880 sectors total, minus 1 for the boot sector
     floppy_sectors = 2*80*18
 
     main = main.ljust((floppy_sectors-1)*512,b'\0')
@@ -93,6 +137,7 @@ def main_func():
     process_sources()
     bootloader, main = process_bootloader()
 
+    # final layout: sector 1 = bootloader, sectors 2.. = main.bin
     with open('output.img', 'wb') as f:
         f.write(bootloader)
         f.write(main)

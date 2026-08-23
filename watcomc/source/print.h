@@ -1,4 +1,19 @@
-/* console output on the bios teletype page 1 */
+/* console output.
+   everything goes through the bios "teletype" service: interrupt
+   10h with ah=0eh prints one character at the cursor position and
+   advances the cursor. it is the simplest possible text output on a
+   pc - no driver, no memory mapping, works on virtually every bios.
+
+   printChar itself contains no c code. the #pragma aux below tells
+   the watcom compiler to replace every call to it with exactly those
+   two machine instructions (inline assembly), which keeps the code
+   tiny and avoids function call overhead:
+     al = character to print
+     bx = page number in the high byte, color in the low byte
+          (page 0 = visible text page, color 1 = blue, only matters
+          in graphics modes)
+   because this pragma lives in the header, every file that includes
+   print.h gets the same inline expansion */
 #ifndef PRINT_H
 #define PRINT_H
 
@@ -9,10 +24,15 @@ void printChar(unsigned char inChar, unsigned short pageAndColor);
     modify [ah]      \
     parm   [al][bx]
 
+/* prints a zero terminated string */
 void print(const char* text);
-void printHex(unsigned char value);
-void printHexShort(unsigned short value);
-void printHexLong(unsigned long value);
+
+/* hex output, most significant digit first */
+void printHex(unsigned char value);         /* 2 digits  */
+void printHexShort(unsigned short value);   /* 4 digits  */
+void printHexLong(unsigned long value);     /* 8 digits  */
+
+/* decimal output without leading zeros */
 void printDecLong(unsigned long value);
 
 #endif

@@ -3,46 +3,54 @@
 
 void resetDiskSystem(void){
   _asm{
-    xor ax,ax
-    int 0x13
+    xor ax,ax          ; ah = 0 = "reset disk system", dl already
+    int 0x13           ; holds the last used drive number
   };
 }
 
-/* INT13 AH=08: what the bios itself thinks the drive looks like.
-   ES:DI must be writable, some xt-class bioses copy a parameter table
-   there. results are max indices except sectors-per-track */
+/* scratch buffer for queryBiosDrive: the bios may copy its internal
+   drive parameter table to es:di, and if that pointed at random
+   memory it could corrupt something. 16 bytes is plenty */
 static unsigned char prmTable[16];
 volatile unsigned char biosCylLo;
 volatile unsigned char biosCylHiSec;
 volatile unsigned char biosHeadMax;
 
 void queryBiosDrive(void){
+  /* offset of the dummy buffer within our flat segment */
   unsigned short diOff = (unsigned short)(unsigned int)prmTable;
   _asm{
-    mov ah, 0x08
-    mov dl, 0x80
-    mov di, diOff
+    mov ah, 0x08       ; "read drive parameters"
+    mov dl, 0x80       ; first hard disk
+    mov di, diOff      ; es:di = writable scratch space
     push ds
-    pop es
+    pop es             ; es = ds = 0 (we keep segments flat)
     int 0x13
-    mov biosCylLo, ch
-    mov biosCylHiSec, cl
+    mov biosCylLo, ch  ; results are max indices, except cl which
+    mov biosCylHiSec, cl ; packs sectors per track in bits 0..5
     mov biosHeadMax, dh
   };
 }
 
+/* builds the chs register pair for a position:
+     ch gets the low 8 bits of the cylinder   -> cylinder << 8
+     cl bits 6..7 get cylinder bits 8..9:
+         cylinder >> 2 slides bits 8..9 down to positions 6..7,
+         & 0xC0 keeps exactly those two
+     cl bits 0..5 get the sector number
+   or-ing the three pieces together yields the value for cx */
 unsigned char readFromDrive(unsigned char numSectorsToRead, unsigned short cylinder, unsigned char head, unsigned char sector, unsigned char driveNumber, void* destination){
   volatile unsigned char status;
   unsigned short myCx = (cylinder << 8) | ((cylinder>>2)& 0xC0) | sector;
   _asm {
-    mov ah, 0x2
+    mov ah, 0x2        ; "read sectors"
     mov al, numSectorsToRead
-    mov cx, myCx
+    mov cx, myCx       ; cylinder + sector, see comment above
     mov dh, head
     mov dl, driveNumber
     mov bx, destination
     int 0x13
-    mov status, ah
+    mov status, ah     ; on return ah holds 0 or an error code
   };
   return status;
 }
@@ -51,7 +59,7 @@ unsigned char writeToDrive(unsigned char numSectorsToWrite, unsigned short cylin
   volatile unsigned char status;
   unsigned short myCx = (cylinder << 8) | ((cylinder>>2)& 0xC0) | sector;
   _asm {
-    mov ah, 0x3
+    mov ah, 0x3        ; same as read but "write sectors"
     mov al, numSectorsToWrite
     mov cx, myCx
     mov dh, head
@@ -63,6 +71,9 @@ unsigned char writeToDrive(unsigned char numSectorsToWrite, unsigned short cylin
   return status;
 }
 
+/* translates a bios error code into text. codes are documented in
+   the ibm pc technical reference / rbil; the important ones here:
+     0x00 ok, 0x11 recovered by ecc (data fine), everything else bad */
 void printInt13Status(unsigned char status){
   switch(status){
     case 0x00:

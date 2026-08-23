@@ -4,25 +4,29 @@
 unsigned char getNextKeyPress(void){
   volatile unsigned char result;
   _asm{
-    mov ah, 0
+    mov ah, 0          ; bios "read key, wait if needed"
     int 0x16
-    mov result, al
+    mov result, al     ; al = ascii code of the key
   };
   return result;
 }
 
 static volatile unsigned char keyFlags;
 
+/* how the non blocking check works: int 16h ah=01 reports "key
+   waiting?" in the zero flag (zf=1 -> none). lahf copies the cpu
+   flags into ah, so bit 6 of keyFlags is zf. if a key IS waiting it
+   is pulled with the blocking call and compared against esc's
+   ascii code (27). any other queued key is swallowed */
 unsigned char escPressed(void){
-  /* non blocking: bios AH=01 sets ZF when no key waiting, LAHF grabs it */
   unsigned char k;
   _asm{
-    mov ah, 1
+    mov ah, 1          ; bios "key available?"
     int 0x16
-    lahf
+    lahf               ; load flags into ah, bit 6 = zero flag
     mov keyFlags, ah
   };
-  if(keyFlags & 0x40){
+  if(keyFlags & 0x40){ /* 0x40 = bit 6 = zf set = buffer empty */
     return 0;
   }
   k = getNextKeyPress();
@@ -32,16 +36,19 @@ unsigned char escPressed(void){
 void waitForEnter(char* prompt){
   print(prompt);
   while(1){
-    if(getNextKeyPress() == 0x0D){
+    if(getNextKeyPress() == 0x0D){   /* 0x0d = carriage return */
       return;
     }
   }
 }
 
-/* decimal input: digits appended with echo, backspace edits,
-   enter submits, empty input returns default */
+/* decimal input editor.
+   the typed digits collect in buf; on enter they are folded into a
+   number with v = v*10 + digit. the expression (v << 3) + (v << 1)
+   is v*8 + v*2 = v*10, done with shifts because it is cheaper on an
+   80286 and avoids the watcom multiply helper */
 unsigned long decInput(char* prompt, unsigned long defVal){
-  char buf[11];
+  char buf[11];        /* max 10 digits + terminator */
   unsigned char len;
   unsigned char k;
   unsigned char i;
@@ -53,12 +60,12 @@ unsigned long decInput(char* prompt, unsigned long defVal){
   print("]: ");
   while(1){
     k = getNextKeyPress();
-    if(k == 0x0D){
+    if(k == 0x0D){                 /* enter = submit */
       if(len == 0){
         print("\r\n");
-        return defVal;
+        return defVal;             /* empty input keeps default */
       }
-      buf[len] = 0;
+      buf[len] = 0;                /* terminate, unused but tidy */
       v = 0;
       for(i = 0; i < len; i++){
         v = (v << 3) + (v << 1) + (buf[i] - '0');
@@ -66,18 +73,18 @@ unsigned long decInput(char* prompt, unsigned long defVal){
       print("\r\n");
       return v;
     }
-    if(k == 0x08){
+    if(k == 0x08){                 /* backspace = erase one digit */
       if(len){
         len--;
-        printChar(0x08, 1);
-        printChar(' ', 1);
-        printChar(0x08, 1);
+        printChar(0x08, 1);        /* move cursor left ... */
+        printChar(' ', 1);         /* ... wipe the character ... */
+        printChar(0x08, 1);        /* ... and move back again */
       }
     }
-    if(k >= '0' && k <= '9'){
+    if(k >= '0' && k <= '9'){      /* accept plain digits only */
       if(len < 10){
         buf[len++] = k;
-        printChar(k, 1);
+        printChar(k, 1);           /* echo */
       }
     }
   }

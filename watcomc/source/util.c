@@ -1,7 +1,14 @@
 #include "util.h"
 
-static char* badFillText = "!BAD-SECTOR!";
-static char* skipFillText = "!HEAD-SKIP!..";
+/* the header sector on each floppy stores multi byte numbers (16 and
+   32 bit). memory holds bytes, not numbers, so a value like
+   0x12345678 has to be written as four separate bytes - and the
+   order matters. convention here (and on all x86 pcs) is "little
+   endian": least significant byte first, i.e.
+     poke32(p, 0x12345678) -> p[0]=0x78 p[1]=0x56 p[2]=0x34 p[3]=0x12
+   writing it byte by byte makes the on-disk layout explicit and
+   independent of compiler tricks. the shifts peel off one byte at a
+   time: v >> 8 discards the lowest byte, etc. */
 
 void poke16(unsigned char* p, unsigned int v){
   p[0] = (unsigned char)v;
@@ -15,6 +22,22 @@ void poke32(unsigned char* p, unsigned long v){
   p[3] = (unsigned char)(v >> 24);
 }
 
+static char* badFillText = "!BAD-SECTOR!";
+static char* skipFillText = "!HEAD-SKIP!..";
+
+/* ---- crc16-ccitt ----
+   a crc is a checksum that detects corrupted data: the whole payload
+   stream is folded through a fixed mathematical recipe and the final
+   16 bit value is stored in the header. when the pc side re-reads a
+   disk it recomputes the crc; any mismatch means silent data damage
+   (bad media that read back "successfully"). this variant uses the
+   ccitt polynomial 0x1021 with initial value 0xffff.
+
+   table driven implementation: crcInit precomputes what one byte
+   contributes for all 256 possible byte values, which turns each
+   subsequent byte into a single table lookup + xor instead of eight
+   shift/xor steps */
+
 static unsigned int crcTable[256];
 
 void crcInit(void){
@@ -23,8 +46,8 @@ void crcInit(void){
   unsigned int c;
   for(i = 0; i < 256; i++){
     c = i << 8;
-    for(j = 0; j < 8; j++){
-      if(c & 0x8000){
+    for(j = 0; j < 8; j++){       /* process one "virtual byte" */
+      if(c & 0x8000){             /* top bit set -> xor polynomial */
         c = (c << 1) ^ 0x1021;
       }else{
         c = c << 1;
@@ -34,6 +57,7 @@ void crcInit(void){
   }
 }
 
+/* folds n bytes into the running checksum */
 unsigned int crcBuf(unsigned int crc, unsigned char* p, unsigned int n){
   while(n--){
     crc = (crc << 8) ^ crcTable[((crc >> 8) ^ *p++) & 0xFF];
@@ -41,6 +65,8 @@ unsigned int crcBuf(unsigned int crc, unsigned char* p, unsigned int n){
   return crc;
 }
 
+/* sector sized compare, used to verify a floppy write by reading the
+   sector back and comparing against what we intended to write */
 unsigned char memcmpBuf(unsigned char* a, unsigned char* b){
   unsigned int i;
   for(i = 0; i < 512; i++){
@@ -51,10 +77,16 @@ unsigned char memcmpBuf(unsigned char* a, unsigned char* b){
   return 0;
 }
 
+/* fill helpers: every sector that could not be read/written is not
+   silently zeroed but overwritten with an obvious text pattern, so a
+   human inspecting the image later immediately sees which regions
+   are untrustworthy. the modulo keeps the pattern repeating across
+   the full 512 bytes */
+
 void fillBadPattern(unsigned char* dest){
   unsigned int i;
   for(i = 0; i < 512; i++){
-    dest[i] = badFillText[i % 12];
+    dest[i] = badFillText[i % 12];   /* 12 = strlen("!BAD-SECTOR!") */
   }
 }
 
@@ -68,19 +100,22 @@ void fillSkipPattern(unsigned char* dest){
   }
 }
 
-/* bios data area tick counter at 0040:006C, incremented 18.206 times
-   per second by the timer interrupt. independent of the cmos battery */
+/* the bios keeps its tick counter in low memory at segment 0x0040,
+   offset 0x006c; the hardware timer interrupt increments it about
+   18.2 times per second. it is a 32 bit counter stored little
+   endian, so we read the two halves and glue them together.
+   volatile because the value changes asynchronously behind our back */
 unsigned long biosTicks(void){
   volatile unsigned short lo;
   volatile unsigned short hi;
   _asm{
-    push es
-    mov ax, 0x0040
+    push es               /* es is clobbered, save it */
+    mov ax, 0x0040        ; bios data area segment
     mov es, ax
-    xor bx, bx
-    mov ax, es:[bx+0x6C]
+    xor bx, bx            ; offset base
+    mov ax, es:[bx+0x6C]  ; low 16 bits of tick count
     mov lo, ax
-    mov ax, es:[bx+0x6E]
+    mov ax, es:[bx+0x6E]  ; high 16 bits
     mov hi, ax
     pop es
   };

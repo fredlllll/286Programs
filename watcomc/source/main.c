@@ -1,7 +1,20 @@
 // HDD saver 2.0 - dumps the whole 60MB MFM/RLL drive to 1.44MB floppies
 //
+// this file is the application logic: session state, batching, the
+// per-disk flow and the startup prompts. everything below it is
+// plumbing that lives in its own module:
+//
+//   int13.c    raw bios disk calls (read/write/reset/query)
+//   hdd.c      hdd geometry, position tracking, resilient reads
+//   floppy.c   position tracking, verified writes
+//   print.c    console output
+//   keyboard.c key input
+//   math.c     32 bit mul/div without runtime helpers
+//   util.c     crc, byte poking, fill patterns, tick counter
+//   definitions.h all tunable constants
+//
 // floppy layout (per disk):
-//   LBA 0      : header sector, see definitions.h and buildHeader()
+//   LBA 0      : header sector, see HEADER_* defines below
 //   LBA 1..9   : reserved (zeros)
 //   LBA 10..2879: payload = consecutive sectors of the hdd image
 //
@@ -31,9 +44,10 @@
 // payload crc therefore covers the stream with every untrustworthy sector
 // replaced by the BADFILL pattern
 //
-// this file holds the application logic: session state, batching,
-// per-disk flow and the startup prompts. hardware access lives in
-// int13.c/hdd.c/floppy.c, output in print.c, input in keyboard.c
+// note: no 32 bit division/multiplication anywhere, watcom would emit
+// calls to runtime helpers (__U4D etc.) which we dont link against.
+// 32 bit add/sub/cmp/constant-shift is fine, it compiles inline.
+// see math.c for the shift-add helpers that stand in for them
 
 #include "definitions.h"
 #include "math.h"
@@ -46,21 +60,26 @@
 
 /* ------------------------- buffers and batch state */
 
+/* sectors travel hdd -> batchBuf -> floppy in whole tracks, which
+   keeps bios transfer counts high (fast) while still giving every
+   sector individual retry handling at write time */
 static unsigned char batchBuf[BATCH_SECTORS*512]; /* one full hdd track */
 static unsigned char headerBuf[512];
-static unsigned char batchFill;
+static unsigned char batchFill;      /* sectors currently in batchBuf */
 
-/* ------------------------- session state */
+/* ------------------------- session state
+   everything here describes progress across the entire dump, not
+   just one sector or one disk */
 
-static unsigned long diskIndex;
-static unsigned long diskStartLBA;
-static unsigned short hddCylSaved;
-static unsigned char hddHeadSaved;
-static unsigned char hddSecSaved;
-static unsigned int sectorCount;
-static unsigned int payloadCrc;
-static unsigned char escFlag;
-static unsigned long diskStartTicks;
+static unsigned long diskIndex;      /* current floppy number */
+static unsigned long diskStartLBA;   /* first hdd lba on current disk */
+static unsigned short hddCylSaved;   /* position snapshot taken before */
+static unsigned char hddHeadSaved;   /* resetForDiskStart() rewinds; */
+static unsigned char hddSecSaved;    /* lets a failed disk be redone */
+static unsigned int sectorCount;     /* payload sectors written this disk */
+static unsigned int payloadCrc;      /* running crc over this disks payload */
+static unsigned char escFlag;        /* set when user pressed esc */
+static unsigned long diskStartTicks; /* timer value when this disk began */
 
 /* append estimated time until this disk finishes, based on pace so far.
    stays in tick units as long as possible; minutes extracted by
@@ -73,17 +92,20 @@ static void printEta(unsigned long elapsedTicks, unsigned int done){
   if(done == 0){
     return;
   }
+  /* rule of three: elapsed/done == total/capacity -> extrapolate.
+     both multiplies go through mulLong because * would need the
+     missing runtime helper */
   totalT = divLong(mulLong(elapsedTicks, DISK_CAPACITY), done);
   if(totalT <= elapsedTicks){
-    return;
+    return;                    /* estimate not ahead: show nothing */
   }
   remainT = totalT - elapsedTicks;
   m = 0;
-  while(remainT >= 1092){
+  while(remainT >= 1092){      /* 1092 ticks ~ 60 seconds */
     remainT -= 1092;
     m++;
   }
-  s = (unsigned int)remainT / 18;
+  s = (unsigned int)remainT / 18;   /* leftover ticks -> seconds */
   print(" eta ");
   printDecLong(m);
   printChar(':', 1);
@@ -96,7 +118,8 @@ static void printEta(unsigned long elapsedTicks, unsigned int done){
 /* writes batchBuf[0..batchFill) to floppy, updates crc/count/position.
    returns 0 ok, 2 = too many floppy failures, disk should be redone
    on fresh media. the crc covers every sector as buffered here, with
-   given-up sectors already replaced by BADFILL */
+   given-up sectors already replaced by BADFILL - so the checksum
+   always describes exactly what is physically on the disk */
 static unsigned char flushBatch(void){
   unsigned int i;
   for(i = 0; i < batchFill; i++){
@@ -107,13 +130,15 @@ static unsigned char flushBatch(void){
     flpLBA++;
     if(badFlpCount >= DISK_BAD_LIMIT){
       batchFill = 0;
-      return 2;
+      return 2;                /* media hopeless, redo on fresh disk */
     }
   }
   batchFill = 0;
   return 0;
 }
 
+/* one status line per flushed track: disk number, absolute hdd
+   position, sectors done, bad count, and a rolling time estimate */
 static void progressLine(void){
   unsigned long now;
   print("\r\nD:");
@@ -134,6 +159,9 @@ static void progressLine(void){
 
 /* ------------------------- header handling */
 
+/* fills headerBuf with the metadata sector for the current disk:
+   identity, resume information, checksums and the two bad lists.
+   written to lba 0 of each floppy so the pc side knows what it got */
 static void buildHeader(unsigned char finalFlag){
   unsigned int i;
   unsigned int hc;
@@ -144,9 +172,9 @@ static void buildHeader(unsigned char finalFlag){
   headerBuf[0] = 'H';
   headerBuf[1] = 'D';
   headerBuf[2] = 'S';
-  headerBuf[3] = 'V';
-  headerBuf[4] = 2;
-  headerBuf[5] = finalFlag;
+  headerBuf[3] = 'V';          /* magic 'HDSV' identifies our disks */
+  headerBuf[4] = 2;            /* format version */
+  headerBuf[5] = finalFlag;    /* bit0 = last disk of the dump */
   poke32(headerBuf + 6, diskIndex);
   poke32(headerBuf + 10, diskStartLBA);
   poke16(headerBuf + 14, sectorCount);
@@ -154,21 +182,28 @@ static void buildHeader(unsigned char finalFlag){
   poke16(headerBuf + 18, diskBadCount);
   poke32(headerBuf + 20, hddTotalSectors);
   poke16(headerBuf + 254, badFlpCount);
+  /* copy the bad lbas of this disk into their header slots */
   for(i = 0; i < diskBadCount && i < MAX_BAD; i++){
     poke32(headerBuf + 24 + i * 4, badLbasDisk[i]);
   }
+  /* ... and the offsets of surrendered floppy sectors */
   for(i = 0; i < badFlpCount && i < MAX_BAD_FLP; i++){
     poke16(headerBuf + 256 + i * 2, badFlpOffsets[i]);
   }
   for(i = 0; id[i]; i++){
     headerBuf[216 + i] = id[i];
   }
+  /* checksum over the header itself (excluding the checksum slot),
+     protects against a corrupted header lying about everything else */
   hc = crcBuf(0xFFFF, headerBuf, 500);
   poke16(headerBuf + 500, hc);
 }
 
 /* returns 0 = header written+verified, nonzero = header could not be
-   written, disk is useless and must be redone */
+   written, disk is useless and must be redone.
+   without a valid header the pc side cannot tell what is on the
+   disk, so a failed header write dooms the disk even if the payload
+   is perfect */
 static unsigned char writeHeaderSector(void){
   unsigned short cylSave;
   unsigned char headSave;
@@ -191,18 +226,21 @@ static unsigned char writeHeaderSector(void){
 
 /* ------------------------- per disk body */
 
+/* rewinds everything to the start of "current" disk. called when a
+   fresh disk is inserted and again after a media-failure retry -
+   hence the position snapshot main() takes before each attempt */
 static void resetForDiskStart(void){
-  hddCyl = hddCylSaved;
+  hddCyl = hddCylSaved;        /* back to the snapshotted hdd spot... */
   hddHead = hddHeadSaved;
   hddSec = hddSecSaved;
   hddLBA = diskStartLBA;
   sectorCount = 0;
-  payloadCrc = 0xFFFF;
+  payloadCrc = 0xFFFF;         /* crc init value, see util.c */
   diskBadCount = 0;
   badFlpCount = 0;
   batchFill = 0;
-  flpCyl = 0;
-  flpHead = 0;
+  flpCyl = 0;                  /* payload starts right after the */
+  flpHead = 0;                 /* reserved header area at lba 10 */
   flpSec = HEADER_LBAS + 1;
   flpLBA = HEADER_LBAS;
 }
@@ -220,13 +258,15 @@ static unsigned char doOneDisk(void){
     if(headMask & (1 << hddHead)){
       readHddResilient(batchBuf + batchFill * 512);
     }else{
+      /* head deselected via bitmask: leave an obvious marker so a
+         later pass with that head enabled can fill the hole */
       fillSkipPattern(batchBuf + batchFill * 512);
     }
     advanceCHSHdd();
     hddLBA++;
     batchFill++;
     if(batchFill == BATCH_SECTORS){
-      r = flushBatch();
+      r = flushBatch();        /* buffer full: write the track out */
       if(r != 0){
         return r;
       }
@@ -264,6 +304,10 @@ void _cstart(void){
   /*shut up linker who cant find _cstart_ that it doesnt need*/
 }
 
+/* main() runs the interactive part once (bios query, geometry
+   prompts), then loops over floppies forever until the drive is
+   fully dumped or the user presses esc. it never returns; finished
+   states halt the cpu */
 #pragma code_seg ( "start_segment" )
 void main(void){
   unsigned long startLBA;
@@ -278,7 +322,7 @@ void main(void){
   print("Dumps ");
   printDecLong(hddTotalSectors);
   print(" hdd sectors (");
-  printDecLong(hddTotalSectors >> 11);
+  printDecLong(hddTotalSectors >> 11);  /* >>11 = /2048 sectors = MB */
   print(" MB) to floppies, ");
   printDecLong(DISK_CAPACITY);
   print(" sectors per disk.\r\n");
@@ -286,21 +330,26 @@ void main(void){
   print("floppy writes are verified and retried automatically.\r\n");
   print("ESC stops cleanly after the current transfer.\r\n\r\n");
 
+  /* ask the bios what drive 0x80 looks like and show it, purely
+     informational: the defaults usually match but a translated
+     bios will report different numbers than the drive really has */
   queryBiosDrive();
-  biosCyls = ((biosCylHiSec & 0xC0) << 2) | biosCylLo;
+  biosCyls = ((biosCylHiSec & 0xC0) << 2) | biosCylLo;  /* unpack cyl */
   if(biosCyls || biosHeadMax){
     print("BIOS drive 0x80: ");
-    printDecLong(biosCyls + 1);
+    printDecLong(biosCyls + 1);          /* bios reports max indices */
     print(" cyl, ");
     printDecLong(biosHeadMax + 1);
     print(" heads, ");
-    printDecLong(biosCylHiSec & 0x3F);
+    printDecLong(biosCylHiSec & 0x3F);   /* cl bits 0..5 = spt */
     print(" spt\r\n");
   }else{
     print("BIOS geometry query failed, using defaults.\r\n");
   }
   print("Geometry must match how the data was written!\r\n");
 
+  /* every prompt shows the compiled-in default in brackets; typing
+     nothing (just enter) accepts it */
   v = decInput("Cylinders", hddCyls);
   if(v && v <= 1024){
     hddCyls = (unsigned int)v;
@@ -340,6 +389,9 @@ void main(void){
   printDecLong(hddTotalSectors >> 11);
   print(" MB).\r\n");
 
+  /* resuming: the lba where the previous run stopped becomes the
+     starting point; its disk number is derived from how many full
+     disks worth of sectors fit before it */
   startLBA = decInput("Resume at hdd LBA", 0);
   diskStartLBA = startLBA;
   rem = 0;
@@ -350,7 +402,7 @@ void main(void){
   if(startLBA >= hddTotalSectors){
     print("Start LBA beyond end of drive.\r\nPower off.\r\n");
     while(1){
-      _asm{ hlt };
+      _asm{ hlt };             /* hlt stops the cpu until interrupt */
     }
   }
 
@@ -359,6 +411,9 @@ void main(void){
   escFlag = 0;
 
   while(1){
+    /* remember where we are on the hdd: if this floppy fails late,
+       resetForDiskStart() can rewind to exactly this spot and the
+       whole content gets re-dumped onto fresh media */
     hddCylSaved = hddCyl;
     hddHeadSaved = hddHead;
     hddSecSaved = hddSec;
@@ -370,6 +425,8 @@ void main(void){
     waitForEnter("");
     diskStartTicks = biosTicks();
 
+    /* return code 2 = media gave up too often; loop asks for a
+       fresh disk and redoes the identical range */
     while(doOneDisk() == 2){
       print("This floppy media is failing too often.\r\n");
       print("Label a FRESH disk with number ");
@@ -381,6 +438,7 @@ void main(void){
     }
 
     if(hddLBA >= hddTotalSectors){
+      /* every sector of the drive has been through the pipeline */
       print("\r\n=== DUMP COMPLETE ===\r\n");
       print("Disks used: ");
       printDecLong(diskIndex + 1);
@@ -399,6 +457,10 @@ void main(void){
     }
 
     if(escFlag){
+      /* clean stop: report where to resume next run. if some data
+         had already been written, the current disk was finalized
+         with a valid header and is usable; otherwise it should be
+         overwritten by reusing the same disk number */
       print("\r\nStopped early.\r\nResume next time at LBA ");
       printDecLong(hddLBA);
       if(sectorCount > 0){

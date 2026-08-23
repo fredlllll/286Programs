@@ -25,13 +25,16 @@ unsigned int diskBadCount;
 unsigned long badLbasAll[MAX_BAD_ALL];
 unsigned int allBadCount;
 
+/* chs counting works exactly like a car odometer: sector 1..spt,
+   then head rolls over, then cylinder. since lba numbers sectors in
+   precisely that order, stepping also equals seeking */
 unsigned char advanceCHSHdd(void){
   hddSec += 1;
-  if(hddSec > hddSpt){
-    hddSec = 1;
+  if(hddSec > hddSpt){       /* past last sector -> next head */
+    hddSec = 1;              /* sectors are numbered from 1! */
     hddHead += 1;
   }
-  if(hddHead >= hddHeads){
+  if(hddHead >= hddHeads){   /* past last head -> next cylinder */
     hddHead = 0;
     hddCyl += 1;
   }
@@ -53,7 +56,14 @@ void seekToLBA(unsigned long target){
 /* reads one hdd sector. retries up to hddRetries times (configurable,
    0 = single attempt). resets only kick in when retrying is enabled:
    a bios disk reset recalibrates the drive (loud seek to cylinder 0
-   and back), which we avoid on a drive with weak heads */
+   and back), which we avoid on a drive with weak heads.
+
+   error policy: status 0 is clean, status 0x11 means "ecc corrected
+   it, data is fine". anything else keeps being retried, and if every
+   attempt fails the sector is given up on: its lba is recorded in
+   both bad logs (disk + session), the buffer gets the BADFILL marker
+   pattern, and the dump carries on - one dead sector must not stop
+   a 60mb rescue job */
 void readHddResilient(unsigned char* dest){
   unsigned char tries;
   unsigned char status;
@@ -62,13 +72,13 @@ void readHddResilient(unsigned char* dest){
   tries = 0;
   while(status != 0 && status != 0x11 && tries < hddRetries){
     if(hddRetries >= 2 && tries == hddRetries / 2){
-      resetDiskSystem();
+      resetDiskSystem();     /* halfway through, try with a reset */
     }
     status = readFromDrive(1, hddCyl, hddHead, hddSec, 0x80, dest);
     tries++;
   }
   if(status != 0 && status != 0x11 && hddRetries > 0){
-    resetDiskSystem();
+    resetDiskSystem();       /* clean up controller state for next sector */
   }
   if(status == 0 || status == 0x11){
     /* 0x11 = recoverable ECC error, bios already corrected the data */
