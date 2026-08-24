@@ -80,7 +80,7 @@ void collectProgramInput(void)
    time estimate */
 static void progressLine(void)
 {
-    print("LBA:");
+    print("\rLBA:");
     printDecLong(hddPos.lba);
     print("/");
     printDecLong(hddGeom.totalSectors);
