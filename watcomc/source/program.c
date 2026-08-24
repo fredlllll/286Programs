@@ -113,8 +113,8 @@ struct Sector hddReadBuffer;
      0x00000..0x003FF  interrupt vector table (untouched)
      0x07C00           bootloader + stack growing down from 0x7C00
      0x07E00..         this program: code + dgroup, must stay < 64k
-     0x10000..0x1C7FF  arena: DESC_PER_BLOCK sector slots
-                       (segment 0x1000, offsets 0..0xC7FF)
+      0x10000..0x1C9FF  arena: DESC_PER_BLOCK sector slots
+                        (segment 0x1000, offsets 0..0xC9FF)
 
    nothing else occupies that range at boot; keep ARENA_SEG in sync
    with build.py, which asserts dgroup really ends below it */
@@ -200,17 +200,17 @@ void writeOutBufferedData(void)
 
     while (1)
     {
-        uint8_t err = 0;
-        err += writeVerified(&currentDescriptorHeader);
+        uint8_t ok = 1;
+        ok &= writeVerified(&currentDescriptorHeader);
         for (i = 0; i < currentDescriptorHeader.count; ++i)
         {
             uint8_t dataIdx = currentDescriptorHeader.desc[i].dataIdx;
             if (dataIdx != DATAIDXNOTWRITTEN)
             {
-                err += writeVerified(dataSlot(dataIdx));
+                ok &= writeVerified(dataSlot(dataIdx));
             }
         }
-        if (!err)
+        if (ok)
         {
             break;
         }

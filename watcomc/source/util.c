@@ -94,7 +94,9 @@ uint32_t biosTicks(void){
   volatile uint16_t lo;
   volatile uint16_t hi;
   _asm{
-    push es               /* es is clobbered, save it */
+    pushf                 /* save caller's interrupt flag state */
+    push es
+    cli                   /* hold off timer irq so lo/hi can't tear */
     mov ax, 0x0040        ; bios data area segment
     mov es, ax
     xor bx, bx            ; offset base
@@ -103,6 +105,7 @@ uint32_t biosTicks(void){
     mov ax, es:[bx+0x6E]  ; high 16 bits
     mov hi, ax
     pop es
+    popf                  /* restore caller's interrupt flag state */
   };
   return ((uint32_t)hi << 16) | lo;
 }

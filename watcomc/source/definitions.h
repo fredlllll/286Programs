@@ -22,7 +22,7 @@
 #define HDD_CYLS 820
 #define HDD_HEADS 6
 #define HDD_SPT 26              /* sectors per track */
-#define HDD_TOTAL_SECTORS ((uint32_t)HDD_CYLS*HDD_HEADS*HDD_SPT)
+#define HDD_TOTAL_SECTORS ((uint32_t)HDD_CYLS*(uint32_t)HDD_HEADS*(uint32_t)HDD_SPT)
 
 /* ---- 1.44mb floppy geometry ----
    fixed for a standard 3.5" hd floppy: 80 cylinders x 2 heads x 18

@@ -19,9 +19,9 @@ uint8_t writeVerified(void __far *src)
   if (writeFloppyAuto(src))
   {
     advanceFloppyPosition();
-    return 0;
+    return 1;
   }
-  return 1;
+  return 0;
 }
 
 void seekFloppy(uint16_t c, uint8_t h, uint8_t s)
@@ -60,7 +60,7 @@ uint8_t writeFloppy(uint16_t c, uint8_t h, uint8_t s, void __far *src)
       status = readFromDrive(1, c, h, s, 0, verifyBuf);
       if (status == 0 && memcmpBuf(src, (uint8_t __far *)verifyBuf) == 0)
       {
-        return 0;
+        return 1;
       }
     }
     rounds++;
@@ -74,7 +74,7 @@ uint8_t writeFloppy(uint16_t c, uint8_t h, uint8_t s, void __far *src)
   printChar('/', 1);
   printDecLong(s);
   print(", giving up\r\n");
-  return 1;
+  return 0;
 }
 
 /* why verify every write: old floppy media lies. a write can report
