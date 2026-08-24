@@ -58,7 +58,7 @@ void collectProgramInput(void)
     print(", retries ");
     printDecLong(hddRetries);
     print(", head mask ");
-    printHex(headMask);
+    printDecLong(headMask);
     print(", total ");
     printDecLong(hddGeom.totalSectors);
     print(" sectors (");
