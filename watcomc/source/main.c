@@ -58,16 +58,7 @@
 
 
 
-/* one status line per flushed group: disk label, absolute hdd
-   position, descriptor/data counts, floppy failures and a rolling
-   time estimate */
-static void progressLine(void){
-  unsigned long now;
-  print("LBA:");
-  printDecLong(hddPos.lba);
-  print("/");
-  printDecLong(hddGeom.totalSectors);
-}
+
 /* ------------------------- entry */
 
 void _cstart(void){
