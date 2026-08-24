@@ -157,7 +157,7 @@ def process_bootloader():
     # 2880 sectors total, minus 1 for the boot sector
     floppy_sectors = 2*80*18
 
-    main = main.ljust((floppy_sectors-1)*512,b'\0')
+    main = main.ljust((main_sectors)*512,b'\0')
 
     return bootloader,main
 
