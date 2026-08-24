@@ -18,7 +18,7 @@
 #define PRINT_H
 #include "intdef.h"
 
-void printChar(unsigned char inChar, unsigned short pageAndColor);
+void printChar(uint8_t inChar, uint16_t pageAndColor);
 #pragma aux printChar = \
     "mov ah, 0x0e"   \
     "int 0x10"       \

@@ -40,6 +40,6 @@
 #define REWRITE_ROUNDS 5        /* floppy: up to RETRY_FLOPPY*REWRITE_ROUNDS attempts per sector */
 
 #define APPROX_DISK_CAPACITY \
-  ((unsigned long)(FLOPPY_TOTAL_SECTORS-28))
+  ((uint32_t)(FLOPPY_TOTAL_SECTORS-28))
 
 #endif

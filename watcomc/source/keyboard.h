@@ -8,14 +8,15 @@
    ascii here */
 #ifndef KEYBOARD_H
 #define KEYBOARD_H
+#include "intdef.h"
 
 /* blocks until a key is pressed, returns its ascii code.
    used for "press enter" prompts and the decimal input editor */
-unsigned char getNextKeyPress(void);
+uint8_t getNextKeyPress(void);
 
 /* non blocking esc check for use inside the copy loop: returns 1 if
    escape was pressed, 0 otherwise (or if some other key is waiting) */
-unsigned char escPressed(void);
+uint8_t escPressed(void);
 
 /* prints prompt, then waits for enter. empty string allowed */
 void waitForEnter(char* prompt);
@@ -23,6 +24,6 @@ void waitForEnter(char* prompt);
 /* prints "prompt [default]: " and lets the user type a decimal
    number. digits are echoed, backspace edits, enter submits, an
    empty input returns defVal unchanged */
-unsigned long decInput(char* prompt, unsigned long defVal);
+uint32_t decInput(char* prompt, uint32_t defVal);
 
 #endif

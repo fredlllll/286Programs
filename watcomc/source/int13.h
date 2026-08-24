@@ -22,16 +22,17 @@
 #ifndef INT13_H
 #define INT13_H
 #include "chs.h"
+#include "intdef.h"
 
 
 /* drive geometry: how many cylinders/heads/sectors a drive has, and
    the resulting total capacity. used both for the runtime-tunable
    hdd description and the fixed floppy layout */
 struct Geometry {
-  unsigned int cyls;
-  unsigned char heads;
-  unsigned char spt;
-  unsigned long totalSectors;
+  uint16_t cyls;
+  uint8_t heads;
+  uint8_t spt;
+  uint32_t totalSectors;
 };
 
 /* advances a chs position by one sector, wrapping like the bios
@@ -48,12 +49,12 @@ void resetDiskSystem(void);
 /* reads numSectorsToRead consecutive sectors starting at the given
    chs position into destination. returns 0 on success, otherwise the
    bios error code (see printInt13Status) */
-unsigned char readFromDrive(unsigned char numSectorsToRead, unsigned short cylinder, unsigned char head, unsigned char sector, unsigned char driveNumber, void* destination);
+uint8_t readFromDrive(uint8_t numSectorsToRead, uint16_t cylinder, uint8_t head, uint8_t sector, uint8_t driveNumber, void* destination);
 
 /* same as readFromDrive but writes */
-unsigned char writeToDrive(unsigned char numSectorsToWrite, unsigned short cylinder, unsigned char head, unsigned char sector, unsigned char driveNumber, void* source);
+uint8_t writeToDrive(uint8_t numSectorsToWrite, uint16_t cylinder, uint8_t head, uint8_t sector, uint8_t driveNumber, void* source);
 
 /* human readable text for a bios int 13h status/error code */
-void printInt13Status(unsigned char status);
+void printInt13Status(uint8_t status);
 
 #endif

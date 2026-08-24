@@ -24,7 +24,7 @@ uint8_t writeVerified(void *src)
   return 1;
 }
 
-void seekFloppy(unsigned int c, unsigned char h, unsigned char s)
+void seekFloppy(uint16_t c, uint8_t h, uint8_t s)
 {
   struct ChsWithLBA tmp;
   tmp.cyl = c;
@@ -36,10 +36,10 @@ void seekFloppy(unsigned int c, unsigned char h, unsigned char s)
 
 uint8_t writeFloppy(uint16_t c, uint8_t h, uint8_t s, void *src)
 {
-  unsigned char rounds;
-  unsigned char tries;
-  unsigned char status;
-  unsigned char verifyBuf[512];
+  uint8_t rounds;
+  uint8_t tries;
+  uint8_t status;
+  uint8_t verifyBuf[512];
 
   rounds = 0;
   while (rounds < REWRITE_ROUNDS)
@@ -95,7 +95,7 @@ uint8_t writeFloppy(uint16_t c, uint8_t h, uint8_t s, void *src)
    for now is "assume writes work" - they have so far, thanks to the
    aggressive retry above. if this ever bites, the fix is to seek
    back and rewrite the descriptor block with a failure status */
-unsigned char writeFloppyAuto(void *src)
+uint8_t writeFloppyAuto(void *src)
 {
   return writeFloppy(floppyPosition.cyl, floppyPosition.head, floppyPosition.sec, src);
 }

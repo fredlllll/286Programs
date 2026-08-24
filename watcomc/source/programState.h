@@ -6,7 +6,7 @@
 
 struct ProgramState
 {
-    unsigned long startLba;
+    uint32_t startLba;
 } prgState;
 
 

@@ -31,9 +31,9 @@ void resetDiskSystem(void){
          & 0xC0 keeps exactly those two
      cl bits 0..5 get the sector number
    or-ing the three pieces together yields the value for cx */
-unsigned char readFromDrive(unsigned char numSectorsToRead, unsigned short cylinder, unsigned char head, unsigned char sector, unsigned char driveNumber, void* destination){
-  volatile unsigned char status;
-  unsigned short myCx = (cylinder << 8) | ((cylinder>>2)& 0xC0) | sector;
+uint8_t readFromDrive(uint8_t numSectorsToRead, uint16_t cylinder, uint8_t head, uint8_t sector, uint8_t driveNumber, void* destination){
+  volatile uint8_t status;
+  uint16_t myCx = (cylinder << 8) | ((cylinder>>2)& 0xC0) | sector;
   _asm {
     mov ah, 0x2        ; "read sectors"
     mov al, numSectorsToRead
@@ -47,9 +47,9 @@ unsigned char readFromDrive(unsigned char numSectorsToRead, unsigned short cylin
   return status;
 }
 
-unsigned char writeToDrive(unsigned char numSectorsToWrite, unsigned short cylinder, unsigned char head, unsigned char sector, unsigned char driveNumber, void* source){
-  volatile unsigned char status;
-  unsigned short myCx = (cylinder << 8) | ((cylinder>>2)& 0xC0) | sector;
+uint8_t writeToDrive(uint8_t numSectorsToWrite, uint16_t cylinder, uint8_t head, uint8_t sector, uint8_t driveNumber, void* source){
+  volatile uint8_t status;
+  uint16_t myCx = (cylinder << 8) | ((cylinder>>2)& 0xC0) | sector;
   _asm {
     mov ah, 0x3        ; same as read but "write sectors"
     mov al, numSectorsToWrite
@@ -66,7 +66,7 @@ unsigned char writeToDrive(unsigned char numSectorsToWrite, unsigned short cylin
 /* translates a bios error code into text. codes are documented in
    the ibm pc technical reference / rbil; the important ones here:
      0x00 ok, 0x11 recovered by ecc (data fine), everything else bad */
-void printInt13Status(unsigned char status){
+void printInt13Status(uint8_t status){
   switch(status){
     case 0x00:
       print("no error");

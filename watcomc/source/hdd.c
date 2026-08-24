@@ -9,8 +9,8 @@
    with */
 const struct Geometry hddGeom = {HDD_CYLS, HDD_HEADS, HDD_SPT, HDD_TOTAL_SECTORS};
 struct ChsWithLBA hddPos = {0, 0, 1, 0};
-unsigned char hddRetries = RETRY_HDD;
-unsigned char headMask = 0xFF;
+uint8_t hddRetries = RETRY_HDD;
+uint8_t headMask = 0xFF;
 
 void advanceHddPosition(void)
 {

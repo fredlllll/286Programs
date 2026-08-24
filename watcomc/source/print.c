@@ -33,17 +33,17 @@ void printHexLong(uint32_t value){
 
 /* powers of ten up to 10^9; the largest unsigned long is about
    4.29 * 10^9, so ten entries are enough */
-static unsigned long pow10[10] = {1ul,10ul,100ul,1000ul,10000ul,100000ul,
-                                  1000000ul,10000000ul,100000000ul,1000000000ul};
+static uint32_t pow10[10] = {1ul,10ul,100ul,1000ul,10000ul,100000ul,
+                             1000000ul,10000000ul,100000000ul,1000000000ul};
 
 /* prints v in decimal without any division: for each power of ten,
    count how often it fits by subtracting over and over. the "started"
    flag suppresses leading zeros but makes sure at least one digit
    (the last) always comes out */
-void printDecLong(unsigned long v){
+void printDecLong(uint32_t v){
   char c;
-  unsigned char i;
-  unsigned char started;
+  uint8_t i;
+  uint8_t started;
   started = 0;
   for(i = 9;; i--){
     c = '0';

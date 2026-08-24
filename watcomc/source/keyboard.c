@@ -1,8 +1,8 @@
 #include "keyboard.h"
 #include "print.h"
 
-unsigned char getNextKeyPress(void){
-  volatile unsigned char result;
+uint8_t getNextKeyPress(void){
+  volatile uint8_t result;
   _asm{
     mov ah, 0          ; bios "read key, wait if needed"
     int 0x16
@@ -11,15 +11,15 @@ unsigned char getNextKeyPress(void){
   return result;
 }
 
-static volatile unsigned char keyFlags;
+static volatile uint8_t keyFlags;
 
 /* how the non blocking check works: int 16h ah=01 reports "key
    waiting?" in the zero flag (zf=1 -> none). lahf copies the cpu
    flags into ah, so bit 6 of keyFlags is zf. if a key IS waiting it
    is pulled with the blocking call and compared against esc's
    ascii code (27). any other queued key is swallowed */
-unsigned char escPressed(void){
-  unsigned char k;
+uint8_t escPressed(void){
+  uint8_t k;
   _asm{
     mov ah, 1          ; bios "key available?"
     int 0x16
@@ -47,12 +47,12 @@ void waitForEnter(char* prompt){
    number with v = v*10 + digit. the expression (v << 3) + (v << 1)
    is v*8 + v*2 = v*10, done with shifts because it is cheaper on an
    80286 and avoids the watcom multiply helper */
-unsigned long decInput(char* prompt, unsigned long defVal){
+uint32_t decInput(char* prompt, uint32_t defVal){
   char buf[11];        /* max 10 digits + terminator */
-  unsigned char len;
-  unsigned char k;
-  unsigned char i;
-  unsigned long v;
+  uint8_t len;
+  uint8_t k;
+  uint8_t i;
+  uint32_t v;
   len = 0;
   print(prompt);
   print(" [");

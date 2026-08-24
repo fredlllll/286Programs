@@ -6,11 +6,11 @@
    done = hdd sectors attempted on this disk. stays in tick units as
    long as possible; minutes extracted by subtraction (1092 ticks ~=
    60 s), seconds by native 16-bit division */
-static void printEta(unsigned long elapsedTicks, unsigned int done){
-  unsigned long totalT;
-  unsigned long remainT;
-  unsigned long m;
-  unsigned int s;
+static void printEta(uint32_t elapsedTicks, uint16_t done){
+  uint32_t totalT;
+  uint32_t remainT;
+  uint32_t m;
+  uint16_t s;
   if(done == 0){
     return;
   }
@@ -27,7 +27,7 @@ static void printEta(unsigned long elapsedTicks, unsigned int done){
     remainT -= 1092;
     m++;
   }
-  s = (unsigned int)remainT / 18;   /* leftover ticks -> seconds */
+  s = (uint16_t)remainT / 18;   /* leftover ticks -> seconds */
   print(" eta ");
   printDecLong(m);
   printChar(':', 1);

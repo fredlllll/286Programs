@@ -10,26 +10,26 @@
    independent of compiler tricks. the shifts peel off one byte at a
    time: v >> 8 discards the lowest byte, etc. */
 
-void poke16(unsigned char* p, unsigned int v){
-  p[0] = (unsigned char)v;
-  p[1] = (unsigned char)(v >> 8);
+void poke16(uint8_t* p, uint16_t v){
+  p[0] = (uint8_t)v;
+  p[1] = (uint8_t)(v >> 8);
 }
 
 /* three byte variant used by the sector descriptors: an hdd lba as
    24 bits little endian. covers drives up to 8 gb with 512 byte
    sectors, which is far beyond anything these mfm/rll controllers
    could ever address */
-void poke24(unsigned char* p, unsigned long v){
-  p[0] = (unsigned char)v;
-  p[1] = (unsigned char)(v >> 8);
-  p[2] = (unsigned char)(v >> 16);
+void poke24(uint8_t* p, uint32_t v){
+  p[0] = (uint8_t)v;
+  p[1] = (uint8_t)(v >> 8);
+  p[2] = (uint8_t)(v >> 16);
 }
 
-void poke32(unsigned char* p, unsigned long v){
-  p[0] = (unsigned char)v;
-  p[1] = (unsigned char)(v >> 8);
-  p[2] = (unsigned char)(v >> 16);
-  p[3] = (unsigned char)(v >> 24);
+void poke32(uint8_t* p, uint32_t v){
+  p[0] = (uint8_t)v;
+  p[1] = (uint8_t)(v >> 8);
+  p[2] = (uint8_t)(v >> 16);
+  p[3] = (uint8_t)(v >> 24);
 }
 
 /* ---- crc16-ccitt ----
@@ -46,12 +46,12 @@ void poke32(unsigned char* p, unsigned long v){
    subsequent byte into a single table lookup + xor instead of eight
    shift/xor steps */
 
-static unsigned int crcTable[256];
+static uint16_t crcTable[256];
 
 void crcInit(void){
-  unsigned int i;
-  unsigned int j;
-  unsigned int c;
+  uint16_t i;
+  uint16_t j;
+  uint16_t c;
   for(i = 0; i < 256; i++){
     c = i << 8;
     for(j = 0; j < 8; j++){       /* process one "virtual byte" */
@@ -66,7 +66,7 @@ void crcInit(void){
 }
 
 /* folds n bytes into the running checksum */
-unsigned int crcBuf(unsigned int crc, unsigned char* p, unsigned int n){
+uint16_t crcBuf(uint16_t crc, uint8_t* p, uint16_t n){
   while(n--){
     crc = (crc << 8) ^ crcTable[((crc >> 8) ^ *p++) & 0xFF];
   }
@@ -75,8 +75,8 @@ unsigned int crcBuf(unsigned int crc, unsigned char* p, unsigned int n){
 
 /* sector sized compare, used to verify a floppy write by reading the
    sector back and comparing against what we intended to write */
-unsigned char memcmpBuf(unsigned char* a, unsigned char* b){
-  unsigned int i;
+uint8_t memcmpBuf(uint8_t* a, uint8_t* b){
+  uint16_t i;
   for(i = 0; i < 512; i++){
     if(a[i] != b[i]){
       return 1;
@@ -90,9 +90,9 @@ unsigned char memcmpBuf(unsigned char* a, unsigned char* b){
    18.2 times per second. it is a 32 bit counter stored little
    endian, so we read the two halves and glue them together.
    volatile because the value changes asynchronously behind our back */
-unsigned long biosTicks(void){
-  volatile unsigned short lo;
-  volatile unsigned short hi;
+uint32_t biosTicks(void){
+  volatile uint16_t lo;
+  volatile uint16_t hi;
   _asm{
     push es               /* es is clobbered, save it */
     mov ax, 0x0040        ; bios data area segment
@@ -104,7 +104,7 @@ unsigned long biosTicks(void){
     mov hi, ax
     pop es
   };
-  return ((unsigned long)hi << 16) | lo;
+  return ((uint32_t)hi << 16) | lo;
 }
 
 void halt(void){

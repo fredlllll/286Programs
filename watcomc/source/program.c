@@ -33,18 +33,18 @@ void collectProgramInput(void)
 {
     /* every prompt shows the compiled-in default in brackets; typing
      nothing (just enter) accepts it */
-    unsigned long v;
+    uint32_t v;
     uint32_t startLba;
     v = decInput("Hdd read retries", hddRetries);
     if (v <= 255)
     {
-        hddRetries = (unsigned char)v;
+        hddRetries = (uint8_t)v;
     }
     print("Head select: decimal bitmask, bit N = head N.\r\n");
     v = decInput("Head bitmask", 0xFF);
     if (v)
     {
-        headMask = (unsigned char)v;
+        headMask = (uint8_t)v;
     }
     print("Using: ");
     printDecLong(hddGeom.cyls);
