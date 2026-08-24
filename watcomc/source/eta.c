@@ -3,31 +3,27 @@
 #include "print.h"
 
 /* append estimated time until this disk finishes, based on pace so far.
-   done = hdd sectors attempted on this disk. stays in tick units as
-   long as possible; minutes extracted by subtraction (1092 ticks ~=
-   60 s), seconds by native 16-bit division */
-void printEta(uint32_t elapsedTicks, uint16_t done){
-  uint32_t totalT;
+   elapsedTicks = ticks since this floppy started, floppyLba = sectors
+   written to this floppy so far. uses the actual floppy fullness
+   instead of a fixed capacity estimate, so headmask settings are
+   reflected accurately */
+void printEta(uint32_t elapsedTicks, uint16_t floppyLba){
   uint32_t remainT;
-  uint32_t m;
+  uint16_t m;
   uint16_t s;
-  if(done == 0){
+  uint16_t rem;
+  if(floppyLba == 0){
     return;
   }
-  /* rule of three: elapsed/done == total/capacity -> extrapolate onto
-     the rough per-disk capacity. both multiplies go through mulLong
-     because * would need the missing runtime helper */
-  totalT = divLong(mulLong(elapsedTicks, APPROX_DISK_CAPACITY), done);
-  if(totalT <= elapsedTicks){
-    return;                    /* estimate not ahead: show nothing */
+  /* elapsed/floppyLba = time per sector; remaining sectors =
+     FLOPPY_TOTAL_SECTORS - floppyLba; multiply to get remaining time */
+  remainT = divLong(mulLong(elapsedTicks,
+                            FLOPPY_TOTAL_SECTORS - floppyLba), floppyLba);
+  if(remainT < 18){
+    return;                    /* less than a second left: show nothing */
   }
-  remainT = totalT - elapsedTicks;
-  m = 0;
-  while(remainT >= 1092){      /* 1092 ticks ~ 60 seconds */
-    remainT -= 1092;
-    m++;
-  }
-  s = (uint16_t)remainT / 18;   /* leftover ticks -> seconds */
+  m = div32_16(remainT, 1092, &rem);
+  s = div32_16(rem, 18, 0);
   print(" eta ");
   printDecLong(m);
   printChar(':', 1);

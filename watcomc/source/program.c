@@ -251,7 +251,6 @@ static uint8_t stopRequested = 0;
 void processFloppy(void)
 {
     uint32_t diskStartTicks = biosTicks();
-    uint16_t sectorsDone = 0;
     uint8_t status;
     currentDescriptorHeaderFloppyLba = 0;
 
@@ -278,9 +277,8 @@ void processFloppy(void)
         }
         addDescriptor(hddPos.lba, status);
         advanceHddPosition();
-        sectorsDone++;
         progressLine();
-        printEta(biosTicks() - diskStartTicks, sectorsDone);
+        printEta(biosTicks() - diskStartTicks, floppyPosition.lba);
     }
     if (currentDescriptorHeader.count > 0)
     {
