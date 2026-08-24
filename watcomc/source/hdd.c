@@ -1,7 +1,6 @@
 #include "hdd.h"
 #include "int13.h"
 #include "print.h"
-#include "util.h"
 
 /* runtime geometry, initialized from the defines in definitions.h; the
    startup prompts allow overriding because the bios may translate
@@ -15,8 +14,9 @@ unsigned char headMask = 0xFF;
 struct Chs hddPos = {0, 0, 1};
 unsigned long hddLBA;
 
-unsigned long badLbasDisk[MAX_BAD];
-unsigned int diskBadCount;
+/* lbas of sectors that could not be read, whole session, printed in
+   the end-of-run summary. the per-disk record of the same information
+   is the sector descriptor stream on the floppies themselves */
 unsigned long badLbasAll[MAX_BAD_ALL];
 unsigned int allBadCount;
 
@@ -41,13 +41,13 @@ void seekToLBA(unsigned long target){
    a bios disk reset recalibrates the drive (loud seek to cylinder 0
    and back), which we avoid on a drive with weak heads.
 
-   error policy: status 0 is clean, status 0x11 means "ecc corrected
-   it, data is fine". anything else keeps being retried, and if every
-   attempt fails the sector is given up on: its lba is recorded in
-   both bad logs (disk + session), the buffer gets the BADFILL marker
-   pattern, and the dump carries on - one dead sector must not stop
-   a 60mb rescue job */
-void readHddResilient(unsigned char* dest){
+   returns the final bios status so the caller can store it in the
+   sector descriptor: 0 = clean read, 0x11 = "ecc corrected it, data
+   is fine" (both count as good, data gets dumped), anything else =
+   given up after every attempt. a dead sector does NOT get dumped:
+   its lba and the error code land in the next descriptor block and
+   the dump carries on - one bad sector costs 5 bytes, not 512 */
+unsigned char readHddResilient(unsigned char* dest){
   unsigned char tries;
   unsigned char status;
 
@@ -64,8 +64,10 @@ void readHddResilient(unsigned char* dest){
     resetDiskSystem();       /* clean up controller state for next sector */
   }
   if(status == 0 || status == 0x11){
-    /* 0x11 = recoverable ECC error, bios already corrected the data */
-    return;
+    /* 0x11 = recoverable ECC error, bios already corrected the data.
+       the distinction is preserved: the restorer may want to know
+       which sectors only survived via ecc correction */
+    return status;
   }
 
   print("\r\nHDD read fail CHS ");
@@ -78,13 +80,12 @@ void readHddResilient(unsigned char* dest){
   printDecLong(hddLBA);
   print(": ");
   printInt13Status(status);
-  print(", skipping\r\n");
+  print(", logging in descriptor\r\n");
 
-  if(diskBadCount < MAX_BAD){
-    badLbasDisk[diskBadCount++] = hddLBA;
-  }
+  /* session-wide log for the end-of-run summary. the per-disk
+     record is the sector descriptor itself now */
   if(allBadCount < MAX_BAD_ALL){
     badLbasAll[allBadCount++] = hddLBA;
   }
-  fillBadPattern(dest);
+  return status;
 }

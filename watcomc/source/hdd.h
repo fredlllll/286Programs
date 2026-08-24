@@ -24,12 +24,9 @@ extern unsigned char headMask;
 extern struct Chs hddPos;
 extern unsigned long hddLBA;
 
-/* lbas of sectors that could not be read:
-   badLbasDisk/diskBadCount      - this floppy disk only
-   badLbasAll/allBadCount        - the whole session, for the summary
-   both are written by readHddResilient(), consumed by buildHeader() */
-extern unsigned long badLbasDisk[MAX_BAD];
-extern unsigned int diskBadCount;
+/* lbas of sectors that could not be read, whole session, for the
+   end-of-run summary printed by main(). the durable per-sector record
+   (lba + error code) lives in the descriptor blocks on the floppies */
 extern unsigned long badLbasAll[MAX_BAD_ALL];
 extern unsigned int allBadCount;
 
@@ -42,8 +39,11 @@ void advanceCHSHdd(void);
    full-travel seek costs only fractions of a second */
 void seekToLBA(unsigned long target);
 
-/* reads one hdd sector into dest with retries; on final failure the
-   buffer is filled with BADFILL and the lba lands in the bad logs */
-void readHddResilient(unsigned char* dest);
+/* reads one hdd sector into dest with retries. returns the bios
+   status: 0 = clean read, 0x11 = read but ecc-corrected (both are
+   good data), anything else = unreadable, dest content undefined
+   and NOT to be dumped; caller records the code in the sector
+   descriptor instead */
+unsigned char readHddResilient(unsigned char* dest);
 
 #endif

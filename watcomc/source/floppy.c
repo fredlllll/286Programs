@@ -7,8 +7,7 @@
 struct Chs flpPos = {0, 0, 1};
 unsigned long flpLBA;
 
-unsigned int badFlpOffsets[MAX_BAD_FLP];
-unsigned int badFlpCount;
+unsigned int flpFailCount;
 
 /* the floppy's geometry comes straight from definitions.h and never
    changes at runtime; totalSectors is unused for stepping but kept
@@ -32,10 +31,16 @@ void advanceCHSFloppy(void){
      - within each round, up to RETRY_FLOPPY attempts with a
        controller reset between failures
      - each successful write is verified by read + compare
-   if everything fails, the sector is surrendered: src is overwritten
-   with BADFILL so the crc computed later covers what actually ends
-   up readable, and the offset is logged into the header */
-unsigned char writeFloppyAuto(unsigned char* src, unsigned int payloadOffset){
+   if everything fails, the sector is surrendered: flpFailCount goes
+   up and nonzero comes back. callers treat that as fatal for the
+   current disk (redo on fresh media).
+
+   TODO: a surrendered data sector leaves its descriptor already
+   written, claiming data that never made it onto the disk. policy
+   for now is "assume writes work" - they have so far, thanks to the
+   aggressive retry above. if this ever bites, the fix is to seek
+   back and rewrite the descriptor block with a failure status */
+unsigned char writeFloppyAuto(unsigned char* src){
   unsigned char rounds;
   unsigned char tries;
   unsigned char status;
@@ -60,14 +65,51 @@ unsigned char writeFloppyAuto(unsigned char* src, unsigned int payloadOffset){
     resetDiskSystem();
   }
 
-  if(badFlpCount < MAX_BAD_FLP){
-    badFlpOffsets[badFlpCount++] = payloadOffset;
-  }
-  fillBadPattern(src);
-  print("\r\nFLOPPY FAIL off ");
-  printDecLong(payloadOffset);
+  flpFailCount++;
+  print("\r\nFLOPPY FAIL at cyl ");
+  printDecLong(flpPos.cyl);
+  printChar('/', 1);
+  printDecLong(flpPos.head);
+  printChar('/', 1);
+  printDecLong(flpPos.sec);
   print(" (hdd LBA ");
   printDecLong(hddLBA);
-  print("), marked bad\r\n");
+  print("), giving up\r\n");
   return 1;
+}
+
+/* builds one descriptor block for a batch of n consecutive hdd
+   sectors starting at firstLba.
+
+   statuses[i] is the read result of batch sector i; sectors with
+   data get consecutive dataIdx values in encounter order, which is
+   exactly how main.c packs their buffers (a failed read does not
+   consume a buffer slot). skipped/failed ones are recorded with
+   their error code but no data index.
+
+   the whole block is zeroed first, so unused tail descriptors are
+   well defined, then the crc seals bytes 0..509 */
+void fillDescBlock(struct DescBlock* blk, unsigned long firstLba,
+                   const unsigned char* statuses, unsigned char n){
+  unsigned int i;
+  unsigned char good;
+  unsigned char* p;
+
+  p = (unsigned char*)blk;
+  for(i = 0; i < 512; i++){
+    p[i] = 0;
+  }
+  blk->count = n;
+  good = 0;
+  for(i = 0; i < (unsigned int)n; i++){
+    poke24(blk->desc[i].lba, firstLba + i);
+    blk->desc[i].status = statuses[i];
+    if(SECTOR_HAS_DATA(statuses[i])){
+      blk->desc[i].dataIdx = good;
+      good++;
+    }else{
+      blk->desc[i].dataIdx = 0;
+    }
+  }
+  blk->crc = crcBuf(0xFFFF, p, 510);
 }

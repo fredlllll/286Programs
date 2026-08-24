@@ -15,6 +15,16 @@ void poke16(unsigned char* p, unsigned int v){
   p[1] = (unsigned char)(v >> 8);
 }
 
+/* three byte variant used by the sector descriptors: an hdd lba as
+   24 bits little endian. covers drives up to 8 gb with 512 byte
+   sectors, which is far beyond anything these mfm/rll controllers
+   could ever address */
+void poke24(unsigned char* p, unsigned long v){
+  p[0] = (unsigned char)v;
+  p[1] = (unsigned char)(v >> 8);
+  p[2] = (unsigned char)(v >> 16);
+}
+
 void poke32(unsigned char* p, unsigned long v){
   p[0] = (unsigned char)v;
   p[1] = (unsigned char)(v >> 8);
@@ -22,16 +32,14 @@ void poke32(unsigned char* p, unsigned long v){
   p[3] = (unsigned char)(v >> 24);
 }
 
-static char* badFillText = "!BAD-SECTOR!";
-static char* skipFillText = "!HEAD-SKIP!..";
-
 /* ---- crc16-ccitt ----
-   a crc is a checksum that detects corrupted data: the whole payload
-   stream is folded through a fixed mathematical recipe and the final
-   16 bit value is stored in the header. when the pc side re-reads a
-   disk it recomputes the crc; any mismatch means silent data damage
-   (bad media that read back "successfully"). this variant uses the
-   ccitt polynomial 0x1021 with initial value 0xffff.
+   a crc is a checksum that detects corrupted data: a block of bytes
+   is folded through a fixed mathematical recipe and the final 16 bit
+   value travels alongside it (in the disk header, in every
+   descriptor block). when the pc side re-reads the disk it recomputes
+   the crc; any mismatch means silent data damage (bad media that read
+   back "successfully"). this variant uses the ccitt polynomial 0x1021
+   with initial value 0xffff.
 
    table driven implementation: crcInit precomputes what one byte
    contributes for all 256 possible byte values, which turns each
@@ -75,29 +83,6 @@ unsigned char memcmpBuf(unsigned char* a, unsigned char* b){
     }
   }
   return 0;
-}
-
-/* fill helpers: every sector that could not be read/written is not
-   silently zeroed but overwritten with an obvious text pattern, so a
-   human inspecting the image later immediately sees which regions
-   are untrustworthy. the modulo keeps the pattern repeating across
-   the full 512 bytes */
-
-void fillBadPattern(unsigned char* dest){
-  unsigned int i;
-  for(i = 0; i < 512; i++){
-    dest[i] = badFillText[i % 12];   /* 12 = strlen("!BAD-SECTOR!") */
-  }
-}
-
-/* marks payload slots of sectors whose head is not selected in the
-   head bitmask: not read at all, not logged as bad, and the pc side
-   leaves the lba uncovered so another pass can fill it in */
-void fillSkipPattern(unsigned char* dest){
-  unsigned int i;
-  for(i = 0; i < 512; i++){
-    dest[i] = skipFillText[i % 13];
-  }
 }
 
 /* the bios keeps its tick counter in low memory at segment 0x0040,

@@ -57,13 +57,17 @@ unsigned long divLong(unsigned long num, unsigned int den){
 }
 
 /* repeated subtraction division. deliberately dumb and slow: it only
-   runs twice at startup (resume lba -> disk number), and DISK_CAPACITY
-   is a compile time constant so the loop needs no division either */
+   runs twice at startup (resume lba -> suggested floppy number).
+   APPROX_DISK_CAPACITY is a compile time constant so the loop needs
+   no division either. the result is only ever a label suggestion -
+   the v3 format makes real per-disk capacity depend on how many
+   sectors get skipped, so exact prediction is neither possible nor
+   needed */
 unsigned long divByDiskCapacity(unsigned long v, unsigned long* remainder){
   unsigned long n;
   n = 0;
-  while(v >= DISK_CAPACITY){
-    v -= DISK_CAPACITY;
+  while(v >= APPROX_DISK_CAPACITY){
+    v -= APPROX_DISK_CAPACITY;
     n++;
   }
   *remainder = v;

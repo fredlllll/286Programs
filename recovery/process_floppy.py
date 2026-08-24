@@ -5,21 +5,30 @@ Subcommands:
   read      copy one physical floppy (or an image file) into dumps/
   assemble  stitch all dumps into hdd.img and write hdd_report.txt
   selftest  synthetic round-trip test of the assembler logic
+  mkpattern create a fake HDD image for emulator testing
+  verify    check assembled hdd.img against mkpattern data
+  badmap    svg graphic: per-head good/bad sector map
 
 Typical workflow:
   python process_floppy.py read --drive A --dumps dumps      (repeat per disk)
   python process_floppy.py assemble --dumps dumps --out hdd.img
 
-Floppy layout written by the 286 tool (v2):
-  LBA 0        header sector ('HDSV', version 2, see watcomc/main.c):
-               magic, version, flags, disk index, start LBA, sector count,
-               payload crc16, bad hdd list, total sectors, bad floppy
-               offset list, header crc16
+Floppy layout written by the 286 tool (v3, see watcomc/source/floppy.h):
+  LBA 0        header sector ('HDSV', version 3): magic, version, flags,
+               disk index (label only), total sectors, descriptor count,
+               data sector count, floppy failure count, tool id, crc16
   LBA 1..9     reserved
-  LBA 10..2879 payload = consecutive hdd sectors, starting at header startLBA
+  LBA 10..     repeating groups, one per hdd track batch:
+                 [descriptor block: count byte + up to 26 entries of
+                  lba(3 bytes le) + int13 status(1) + dataIdx(1),
+                  padded, crc16 over bytes 0..509]
+                 [the 512-byte data sectors whose status says data follows]
 
-Unreadable spots are filled with '!BAD-SECTOR!' by the 286 tool itself.
-This script treats those bytes as intentional markers, never as data.
+Every dumped hdd sector carries its own lba, so disk order does not
+matter and gaps are legal. Sectors that could not be read get a
+descriptor with the bios error code and NO data - they cost nothing.
+Statuses with data: 0x00 (read ok) and 0x11 (ecc corrected). 0xfe means
+the head was masked out this pass; anything else is the raw bios error.
 
 No third party dependencies, stdlib only.
 """
@@ -34,19 +43,40 @@ import time
 
 SECTOR = 512
 HEADER_LBAS = 10
-DISK_CAPACITY = 2870                     # payload sectors per 1.44MB floppy
 DISK_BYTES = 2880 * SECTOR
 MAGIC = b'HDSV'
-VERSION = 2
+VERSION = 3
 FLAG_FINAL = 0x01
-MAX_BAD_HDD = 48
-MAX_BAD_FLP = 30
 
-BADFILL = ('!BAD-SECTOR!'.encode('ascii') * (SECTOR // 12 + 1))[:SECTOR]
-# payload slot for sectors whose head was deselected via the head
-# bitmask: never read, never logged bad; assembly leaves these LBAs
-# uncovered so a later pass can fill them in
-HEADSKIP = ('!HEAD-SKIP!..'.encode('ascii') * (SECTOR // 13 + 1))[:SECTOR]
+DESC_PER_BLOCK = 26        # descriptors per block == BATCH_SECTORS on the 286
+ENTRY_SIZE = 5             # lba24 + status8 + dataIdx8
+
+ST_OK = 0x00               # read clean, data present
+ST_ECC = 0x11              # read after ecc correction, data present
+ST_HEADSKIP = 0xFE         # head masked out this pass, never attempted
+
+
+def has_data(status):
+    """True when the descriptor's sector carries real data."""
+    return status in (ST_OK, ST_ECC)
+
+
+INT13_ERRORS = {
+    0x01: 'bad command', 0x02: 'address mark not found',
+    0x03: 'write protected', 0x04: 'sector not found',
+    0x06: 'media changed', 0x08: 'bad dma', 0x09: 'dma boundary',
+    0x0c: 'media type unknown', 0x10: 'bad ecc on read',
+    0x20: 'controller failure', 0x40: 'seek failed',
+    0x80: 'timeout', 0xaa: 'drive not ready', 0xbb: 'undefined error',
+    0xcc: 'write fault', 0xe0: 'status error',
+}
+
+
+def status_name(status):
+    if status == ST_HEADSKIP:
+        return 'head masked out'
+    return INT13_ERRORS.get(status, 'bios error 0x%02x' % status)
+
 
 # ---------------------------------------------------------------- crc16
 
@@ -69,47 +99,88 @@ def crc16(data, crc=0xFFFF):
 
 
 def parse_header(sector0):
-    """Parse the header sector. Returns dict or None if magic mismatch."""
+    """Parse the v3 header sector. Returns dict or None if magic mismatch."""
     if len(sector0) < SECTOR or sector0[0:4] != MAGIC:
         return None
     version = sector0[4]
     flags = sector0[5]
-    disk_index, start_lba = struct.unpack_from('<II', sector0, 6)
-    count, pcrc, bad_hdd_n = struct.unpack_from('<HHH', sector0, 14)
-    total_sectors = struct.unpack_from('<I', sector0, 20)[0]
-    bad_flp_n = struct.unpack_from('<H', sector0, 254)[0]
+    disk_index, total_sectors = struct.unpack_from('<II', sector0, 6)
+    desc_count, data_count, flp_fail = struct.unpack_from('<HHH', sector0, 14)
     return {
         'version': version,
         'flags': flags,
         'disk_index': disk_index,
-        'start_lba': start_lba,
         'total_sectors': total_sectors,
-        'count': count,
-        'payload_crc': pcrc,
-        'bad_hdd_n': bad_hdd_n,
-        'bad_flp_n': bad_flp_n,
-        'bad_hdd': list(struct.unpack_from('<%dI' % min(bad_hdd_n, MAX_BAD_HDD),
-                                           sector0, 24)) if bad_hdd_n else [],
-        'bad_flp': list(struct.unpack_from('<%dH' % min(bad_flp_n, MAX_BAD_FLP),
-                                           sector0, 256)) if bad_flp_n else [],
+        'desc_count': desc_count,
+        'data_count': data_count,
+        'flp_fail': flp_fail,
+        'tool_id': bytes(sector0[20:56]).rstrip(b'\0').decode('ascii', 'replace'),
         'header_crc_ok':
-            struct.unpack_from('<H', sector0, 500)[0] == crc16(bytes(sector0[0:500])),
+            struct.unpack_from('<H', sector0, 510)[0] == crc16(bytes(sector0[0:510])),
     }
+
+
+# ---------------------------------------------------------------- groups
+
+
+def iter_groups(image):
+    """Walk the descriptor groups of a dump image.
+
+    Yields dicts:
+      first_lba   hdd lba of the group's first descriptor
+      entries     list of (lba, status, data_idx)
+      datas       list of 512-byte data sectors (index == dataIdx)
+      crc_ok      block crc check result
+    Stops at an all-zero block (the zero fill after the last group) or
+    at a block whose crc/count is broken - everything behind such a
+    block is uninterpretable anyway.
+    """
+    pos = HEADER_LBAS * SECTOR
+    while pos + SECTOR <= DISK_BYTES:
+        block = image[pos:pos + SECTOR]
+        if not any(block):
+            break                                   # end-of-stream padding
+        count = block[0]
+        if count > DESC_PER_BLOCK:
+            break                                   # corrupt, cannot trust
+        crc_ok = struct.unpack_from('<H', block, 510)[0] \
+            == crc16(bytes(block[0:510]))
+        entries = []
+        for i in range(count):
+            off = 1 + i * ENTRY_SIZE
+            lba = int.from_bytes(block[off:off + 3], 'little')
+            entries.append((lba, block[off + 3], block[off + 4]))
+        ngood = sum(1 for _, st, _ in entries if has_data(st))
+        datas = []
+        dpos = pos + SECTOR
+        for _k in range(ngood):
+            if dpos + SECTOR > DISK_BYTES:
+                break                               # truncated image
+            datas.append(image[dpos:dpos + SECTOR])
+            dpos += SECTOR
+        yield {
+            'first_lba': entries[0][0] if entries else 0,
+            'entries': entries,
+            'datas': datas,
+            'crc_ok': crc_ok,
+        }
+        pos += SECTOR * (1 + ngood)
 
 
 def evaluate_image(image):
     """Full validation of one 1.44MB dump.
 
     Returns dict:
-      ok          header sane and geometry plausible (safe to place)
-      reason      why not ok, or why the payload crc failed
-      info        parsed header dict (None when magic missing)
-      crc_ok      True/False, None when not ok
-      payload     post-substitution payload bytes (when ok)
-      undeclared_badfill  offsets equal to BADFILL but not listed in header
+      ok           header sane and group stream consistent (safe to place)
+      reason       why not ok
+      info         parsed header dict (None when magic missing)
+      groups       list from iter_groups() (when ok)
+      desc_total   descriptors actually found
+      data_total   data sectors actually found
+      blocks_bad   number of descriptor blocks failing their crc
     """
-    res = {'ok': False, 'reason': '', 'info': None, 'crc_ok': None,
-           'payload': None, 'undeclared_badfill': []}
+    res = {'ok': False, 'reason': '', 'info': None, 'groups': [],
+           'desc_total': 0, 'data_total': 0, 'blocks_bad': 0}
     if len(image) != DISK_BYTES:
         res['reason'] = 'unexpected size %d (want %d)' % (len(image), DISK_BYTES)
         return res
@@ -124,33 +195,27 @@ def evaluate_image(image):
     if hdr['version'] != VERSION:
         res['reason'] = 'unsupported version %d' % hdr['version']
         return res
-    if hdr['count'] == 0 or hdr['count'] > DISK_CAPACITY:
-        res['reason'] = 'implausible sector count %d' % hdr['count']
-        return res
-    if hdr['start_lba'] + hdr['count'] > hdr['total_sectors']:
-        res['reason'] = 'range %d..%d exceeds drive size %d' % (
-            hdr['start_lba'], hdr['start_lba'] + hdr['count'] - 1,
-            hdr['total_sectors'])
-        return res
 
-    payload = bytearray(
-        image[HEADER_LBAS * SECTOR:(HEADER_LBAS + hdr['count']) * SECTOR])
-    for off in hdr['bad_flp']:
-        if off < hdr['count']:
-            payload[off * SECTOR:(off + 1) * SECTOR] = BADFILL
-    calc = crc16(payload)
-    res['crc_ok'] = (calc == hdr['payload_crc'])
-    if not res['crc_ok']:
-        res['reason'] = 'payload CRC mismatch (stored %04X, got %04X)' % (
-            hdr['payload_crc'], calc)
-
-    declared = set(hdr['bad_flp'])
-    declared.update(b - hdr['start_lba'] for b in hdr['bad_hdd']
-                    if 0 <= b - hdr['start_lba'] < hdr['count'])
-    res['undeclared_badfill'] = [
-        i for i in range(hdr['count'])
-        if i not in declared and payload[i * SECTOR:(i + 1) * SECTOR] == BADFILL]
-    res['payload'] = bytes(payload)
+    groups = list(iter_groups(image))
+    res['groups'] = groups
+    res['desc_total'] = sum(len(g['entries']) for g in groups)
+    res['data_total'] = sum(len(g['datas']) for g in groups)
+    res['blocks_bad'] = sum(1 for g in groups if not g['crc_ok'])
+    for g in groups:
+        if len(g['datas']) < sum(1 for _, st, _ in g['entries'] if has_data(st)):
+            res['reason'] = 'group at lba %d truncated' % g['first_lba']
+            return res
+    if hdr['desc_count'] != res['desc_total']:
+        res['reason'] = ('header claims %d descriptors, found %d'
+                         % (hdr['desc_count'], res['desc_total']))
+        return res
+    if hdr['data_count'] != res['data_total']:
+        res['reason'] = ('header claims %d data sectors, found %d'
+                         % (hdr['data_count'], res['data_total']))
+        return res
+    if any(e[0] >= hdr['total_sectors'] for g in groups for e in g['entries']):
+        res['reason'] = 'descriptor lba beyond drive size %d' % hdr['total_sectors']
+        return res
     res['ok'] = True
     return res
 
@@ -248,19 +313,22 @@ def read_one_disk(src, dumps_dir):
     if ev['ok']:
         i = ev['info']
         name = 'disk_%03d' % i['disk_index']
-        print('Header OK : disk %d, LBA %d..%d, count %d%s, bad hdd %d, bad flp %d'
-              % (i['disk_index'], i['start_lba'], i['start_lba'] + i['count'] - 1,
-                 i['count'],
+        err_n = sum(1 for g in ev['groups'] for _, st, _ in g['entries']
+                    if not has_data(st) and st != ST_HEADSKIP)
+        skip_n = sum(1 for g in ev['groups'] for _, st, _ in g['entries']
+                     if st == ST_HEADSKIP)
+        print('Header OK : disk %d, %d descriptors, %d data sectors%s, '
+              '%d read errors, %d head-skipped%s'
+              % (i['disk_index'], ev['desc_total'], ev['data_total'],
                  ', FINAL' if i['flags'] & FLAG_FINAL else '',
-                 i['bad_hdd_n'], i['bad_flp_n']))
-        if ev['crc_ok']:
-            print('Payload CRC OK - disk is good.')
-        else:
-            print('WARNING: %s - re-read this disk.' % ev['reason'])
-        if ev['undeclared_badfill']:
-            print('NOTE: %d skipped sector(s) beyond the header log '
-                  'limit (48 hdd / 30 flp) - normal, no re-read needed.'
-                  % len(ev['undeclared_badfill']))
+                 err_n, skip_n,
+                 ', %d BAD BLOCK(S)' % ev['blocks_bad'] if ev['blocks_bad'] else ''))
+        if ev['blocks_bad']:
+            print('WARNING: %d descriptor block(s) fail their crc - affected '
+                  'data will be marked suspect.' % ev['blocks_bad'])
+        if i['flp_fail']:
+            print('WARNING: header reports %d surrendered floppy write(s) '
+                  '- re-read this disk.' % i['flp_fail'])
         if errors:
             print('NOTE: %d unreadable region(s) during raw read.' % len(errors))
     else:
@@ -313,7 +381,17 @@ def load_dumps(dumps_dir):
 
 
 def run_assembly(dumps_dir, out_path, verbose=True):
-    """Stitch all dumps into one image. Returns report dict."""
+    """Stitch all dumps into one image. Returns report dict.
+
+    Placement rules, per descriptor:
+      status has data  -> scatter its data sector to file offset lba*512
+      status HEADSKIP  -> leave the lba uncovered (awaiting another pass)
+      other status     -> leave uncovered, remember the error code
+    A dump whose descriptor block fails its crc still gets placed, but
+    every sector it provides is flagged suspect. Overlaps: first valid
+    placement wins; a suspect placement can be upgraded by a later
+    trustworthy one.
+    """
     candidates, rejected, totals = load_dumps(dumps_dir)
     if not candidates:
         sys.exit('No valid HDSV disks found in %s' % dumps_dir)
@@ -321,100 +399,71 @@ def run_assembly(dumps_dir, out_path, verbose=True):
         print('WARNING: disks disagree about drive size: %s' % totals)
     total = max(totals.items(), key=lambda kv: kv[1])[0]
 
-    # every valid dump participates in the merge; overlapping ranges
-    # resolve per sector (real data beats !BAD-SECTOR! filler), so a
-    # re-dump can only improve the result, never regress it
     chosen = []
     for lst in candidates.values():
         chosen.extend(lst)
-    chosen.sort(key=lambda r: (r['ev']['info']['start_lba'],
-                               not r['ev']['crc_ok'], r['file']))
+    chosen.sort(key=lambda r: (min((e[0] for g in r['ev']['groups']
+                                    for e in g['entries']), default=0),
+                               r['file']))
 
     image_out = bytearray(total * SECTOR)
     covered = bytearray(total)
     suspect = bytearray(total)
+    err_codes = {}        # lba -> bios status of the failed read
+    headskipped_lbas = set()
     overlaps = []
-    declared_bad_hdd = set()
-    declared_bad_spots = set()
-    final_seen = False
-    headskipped = 0
     upgrades_total = 0
+    final_seen = False
 
     for rec in chosen:
         i = rec['ev']['info']
-        s, c = i['start_lba'], i['count']
-        pl = rec['ev']['payload']
         if i['flags'] & FLAG_FINAL:
             final_seen = True
         ov = 0
         upgraded = 0
-        for j in range(c):
-            lba = s + j
-            if lba >= total:
-                break
-            sec = pl[j * SECTOR:(j + 1) * SECTOR]
-            if sec == HEADSKIP:
-                # head was deselected on this pass: leave the LBA
-                # untouched so another pass can cover it
-                if not covered[lba]:
-                    headskipped += 1
-                continue
-            if covered[lba]:
-                ov += 1
-                # a later dump of the same range may have recovered
-                # sectors an earlier attempt gave up on: prefer real
-                # data over !BAD-SECTOR! filler, but only trust data
-                # from dumps whose payload crc verified
-                if (rec['ev']['crc_ok']
-                        and image_out[lba * SECTOR:(lba + 1) * SECTOR] == BADFILL
-                        and sec != BADFILL):
+        for g in rec['ev']['groups']:
+            trust = g['crc_ok']
+            for lba, st, didx in g['entries']:
+                if lba >= total:
+                    continue
+                if has_data(st):
+                    sec = g['datas'][didx]
+                    if covered[lba]:
+                        ov += 1
+                        if trust and suspect[lba]:
+                            # trustworthy re-dump upgrades earlier
+                            # suspect data from a damaged-block group
+                            suspect[lba] = 0
+                            image_out[lba * SECTOR:(lba + 1) * SECTOR] = sec
+                            upgraded += 1
+                        continue
+                    covered[lba] = 1
+                    if not trust:
+                        suspect[lba] = 1
                     image_out[lba * SECTOR:(lba + 1) * SECTOR] = sec
-                    suspect[lba] = 0
-                    upgraded += 1
-                continue
-            covered[lba] = 1
-            if not rec['ev']['crc_ok']:
-                suspect[lba] = 1
-            image_out[lba * SECTOR:(lba + 1) * SECTOR] = sec
+                elif st == ST_HEADSKIP:
+                    headskipped_lbas.add(lba)
+                else:
+                    prev = err_codes.get(lba)
+                    if prev is None or st < prev:
+                        err_codes[lba] = st
         if ov:
-            overlaps.append((i['disk_index'], s, c, ov))
+            overlaps.append((i['disk_index'], ov))
         upgrades_total += upgraded
-        # record which sectors this dump declared untrustworthy.
-        # no image rewriting here: placement already stored this
-        # record's !BAD-SECTOR! filler where it failed, and a later
-        # dump may legitimately have recovered the sector -- a stale
-        # declaration must not poison better data
-        for blba in i['bad_hdd']:
-            j = blba - s
-            if 0 <= j < c and blba < total and \
-                    pl[j * SECTOR:(j + 1) * SECTOR] == BADFILL:
-                declared_bad_hdd.add(blba)
-        for off in i['bad_flp']:
-            lba = s + off
-            if off < c and lba < total and \
-                    pl[off * SECTOR:(off + 1) * SECTOR] == BADFILL:
-                declared_bad_spots.add(lba)
 
     gaps = []
     run_start = None
     for lba in range(total):
-        if not covered[lba] and run_start is None:
+        attempted = covered[lba] or lba in err_codes or lba in headskipped_lbas
+        if not attempted and run_start is None:
             run_start = lba
-        elif covered[lba] and run_start is not None:
+        elif attempted and run_start is not None:
             gaps.append((run_start, lba - 1))
             run_start = None
     if run_start is not None:
         gaps.append((run_start, total - 1))
 
-    suspect_count = sum(suspect)
     coverage = sum(covered)
-    # every BADFILL sector in the final image was skipped by the 286
-    # tool (hdd read fail or floppy write fail); headers only log the
-    # first 48+30 per disk, so count them from the data instead
-    skipped_count = sum(
-        1 for lba in range(total)
-        if covered[lba] and image_out[lba * SECTOR:(lba + 1) * SECTOR] == BADFILL)
-    complete = (not gaps) and final_seen
 
     with open(out_path, 'wb') as f:
         f.write(image_out)
@@ -423,18 +472,15 @@ def run_assembly(dumps_dir, out_path, verbose=True):
         'gaps': gaps,
         'chosen_files': [r['file'] for r in chosen],
         'final_seen': final_seen,
-        'declared_bad_hdd': declared_bad_hdd,
-        'declared_bad_spots': declared_bad_spots,
-        'suspect_count': suspect_count,
-        'skipped_count': skipped_count,
-        'headskipped': headskipped,
-        'upgrades': upgrades_total,
+        'err_codes': err_codes,
+        'headskipped_lbas': headskipped_lbas,
+        'suspect_count': sum(suspect),
         'coverage': coverage,
         'overlaps': overlaps,
-        'complete': complete,
+        'upgrades': upgrades_total,
+        'complete': (not gaps) and final_seen,
         'total': total,
         'rejected': rejected,
-        'skipped_dupes': [],
         'chosen_records': chosen,
     }
     report_path = os.path.splitext(out_path)[0] + '_report.txt'
@@ -454,21 +500,18 @@ def write_report(path, rep, dumps_dir):
     ap('drive size: %d sectors (%.2f MB)' % (rep['total'], rep['total'] * SECTOR / 1048576.0))
     ap('')
     ap('=== disks used ===')
-    ap('%-5s %-24s %-10s %-6s %-4s %-7s %-7s' %
-       ('idx', 'file', 'lba range', 'count', 'crc', 'badHDD', 'badFLP'))
+    ap('%-5s %-24s %-9s %-9s %-7s %-6s' %
+       ('idx', 'file', 'lbas', 'data', 'blocks', 'flags'))
     for rec in rep['chosen_records']:
-        i = rec['ev']['info']
-        ap('%-5d %-24s %6d-%-5d %-6d %-4s %-7d %-7d%s' % (
-            i['disk_index'], rec['file'], i['start_lba'],
-            i['start_lba'] + i['count'] - 1, i['count'],
-            'OK' if rec['ev']['crc_ok'] else 'FAIL',
-            i['bad_hdd_n'], i['bad_flp_n'],
-            ' FINAL' if i['flags'] & FLAG_FINAL else ''))
-    if rep['skipped_dupes']:
-        ap('')
-        ap('duplicate variants ignored:')
-        for fn in rep['skipped_dupes']:
-            ap('  %s' % fn)
+        i = ev_info(rec)
+        flags = []
+        if i['flags'] & FLAG_FINAL:
+            flags.append('FINAL')
+        if i['flp_fail']:
+            flags.append('FLPFAIL=%d' % i['flp_fail'])
+        ap('%-5d %-24s %-9d %-9d %-7d %s' % (
+            i['disk_index'], rec['file'], i['desc_count'], i['data_count'],
+            rec['ev']['blocks_bad'], ' '.join(flags)))
     if rep['rejected']:
         ap('')
         ap('files rejected (no usable header):')
@@ -476,25 +519,42 @@ def write_report(path, rep, dumps_dir):
             ap('  %-24s %s' % (fn, why))
     if rep['overlaps']:
         ap('')
-        ap('overlapping ranges (first disk placed wins):')
-        for idx, s, c, ov in rep['overlaps']:
-            ap('  disk %d at %d..%d: %d sectors already covered' % (idx, s, s + c - 1, ov))
+        ap('overlapping placements (first valid wins):')
+        for idx, ov in rep['overlaps']:
+            ap('  disk %d: %d sectors already covered' % (idx, ov))
     ap('')
     ap('=== coverage ===')
     ap('sectors covered : %d / %d (%.2f%%)' % (
         rep['coverage'], rep['total'], 100.0 * rep['coverage'] / rep['total']))
-    ap('suspect sectors : %d (from disks with failed payload crc)' % rep['suspect_count'])
-    ap('skipped sectors : %d contain !BAD-SECTOR! filler (headers only '
-       'log the first 48 hdd + 30 flp per disk)' % rep['skipped_count'])
-    ap('head-filtered   : %d slots were not read (head bitmask) and are '
-       'left for another pass' % rep['headskipped'])
-    ap('upgraded        : %d sectors where a later dump recovered what '
-       'an earlier one gave up on' % rep['upgrades'])
-    ap('declared bad hdd: %d' % len(rep['declared_bad_hdd']))
-    ap('declared bad flp: %d (mapped to image lbas below)' % len(rep['declared_bad_spots']))
+    ap('suspect sectors : %d (data from descriptor blocks with failed crc)'
+       % rep['suspect_count'])
+    ap('head-filtered   : %d lbas were never attempted (head bitmask), left '
+       'for another pass' % len(rep['headskipped_lbas']))
+    ap('upgraded        : %d sectors where a later dump recovered suspect data'
+       % rep['upgrades'])
+    ap('read failures   : %d lbas with logged bios error codes'
+       % len(rep['err_codes']))
+    if rep['err_codes']:
+        ap('')
+        ap('=== read failures by code ===')
+        by_code = {}
+        for lba in sorted(rep['err_codes']):
+            by_code.setdefault(rep['err_codes'][lba], []).append(lba)
+        for code in sorted(by_code):
+            lbas = by_code[code]
+            ap('  0x%02x %-22s : %d sectors' % (
+                code, status_name(code), len(lbas)))
+            line = '    '
+            for b in lbas:
+                line += ' %d' % b
+                if len(line) > 74:
+                    ap(line)
+                    line = '    '
+            if line.strip():
+                ap(line)
     if rep['gaps']:
         ap('')
-        ap('missing ranges:')
+        ap('missing ranges (never attempted):')
         for g0, g1 in rep['gaps']:
             ap('  lba %d..%d  (%d sectors, %.2f MB)' % (
                 g0, g1, g1 - g0 + 1, (g1 - g0 + 1) * SECTOR / 1048576.0))
@@ -502,40 +562,28 @@ def write_report(path, rep, dumps_dir):
             ap('    let it run to the end; overlapping data is harmless.')
     else:
         ap('missing ranges: none')
-    bad_all = sorted(rep['declared_bad_hdd'] | rep['declared_bad_spots'])
-    if bad_all:
-        ap('')
-        ap('image lbas containing !BAD-SECTOR! filler:')
-        line = ' '
-        for b in bad_all:
-            line += ' %d' % b
-            if len(line) > 74:
-                ap(line)
-                line = ' '
-        if line.strip():
-            ap(line)
     ap('')
-    ap('status: %s' % ('COMPLETE - all sectors accounted for'
+    ap('status: %s' % ('COMPLETE - all sectors either restored or known-bad'
                       if rep['complete'] else
                       'INCOMPLETE - missing ranges or final flag not seen'))
     with open(path, 'w') as f:
         f.write('\n'.join(lines) + '\n')
 
 
+def ev_info(rec):
+    return rec['ev']['info']
+
+
 def print_assembly_summary(rep, out_path, report_path):
-    print('Disks used   : %d (%d duplicates ignored, %d files rejected)'
-          % (len(rep['chosen_files']), len(rep['skipped_dupes']), len(rep['rejected'])))
+    print('Disks used   : %d (%d files rejected)'
+          % (len(rep['chosen_files']), len(rep['rejected'])))
     print('Coverage     : %d / %d sectors (%.2f%%)'
           % (rep['coverage'], rep['total'], 100.0 * rep['coverage'] / rep['total']))
-    print('Suspect      : %d sectors' % rep['suspect_count'])
-    print('Skipped      : %d sectors (BADFILL, incl. beyond header log limit)'
-          % rep['skipped_count'])
-    print('Head-filtered: %d slots (not read, awaiting another pass)'
-          % rep['headskipped'])
-    print('Upgrades     : %d sectors (recovered by a later dump)'
-          % rep['upgrades'])
-    print('Declared bad : %d hdd lbas, %d floppy spots'
-          % (len(rep['declared_bad_hdd']), len(rep['declared_bad_spots'])))
+    print('Suspect      : %d sectors (from blocks with failed crc)' % rep['suspect_count'])
+    print('Head-filtered: %d lbas (not attempted, awaiting another pass)'
+          % len(rep['headskipped_lbas']))
+    print('Upgrades     : %d sectors (recovered by a later dump)' % rep['upgrades'])
+    print('Read failures: %d lbas with logged bios error codes' % len(rep['err_codes']))
     if rep['gaps']:
         print('Missing ranges:')
         for g0, g1 in rep['gaps']:
@@ -551,38 +599,52 @@ def fake_sector(lba):
     return bytes(((lba * 7 + j * 13 + (j >> 4)) & 0xFF) for j in range(SECTOR))
 
 
-def make_synthetic_disk(index, start_lba, total, bad_hdd=(), bad_flp=(),
-                        final=False, corrupt_byte=None):
-    """Build a 1.44MB image exactly like the 286 tool would write it."""
-    count = min(DISK_CAPACITY, total - start_lba)
-    stream = bytearray()
-    for i in range(count):
-        lba = start_lba + i
-        if lba in bad_hdd or i in bad_flp:
-            stream += BADFILL
-        else:
-            stream += fake_sector(lba)
-    stored_crc = crc16(bytes(stream))
-    if corrupt_byte is not None:
-        # simulate media rot AFTER the fact: header still claims old crc
-        stream[corrupt_byte] ^= 0xFF
+def make_v3_disk(index, seq, total, final=False, corrupt_group=None,
+                 corrupt_byte=None, flp_fail=0):
+    """Build a 1.44MB image exactly like the 286 tool writes it.
+
+    seq: ordered list of (lba, status) pairs this disk covers. Data is
+    generated for every status that carries data; others contribute
+    only their descriptor. corrupt_group/corrupt_byte flip one byte in
+    the given group's descriptor block AFTER its crc was appended,
+    simulating media rot.
+    """
+    img = bytearray(DISK_BYTES)
     hdr = bytearray(SECTOR)
     hdr[0:4] = MAGIC
     hdr[4] = VERSION
     hdr[5] = FLAG_FINAL if final else 0
-    struct.pack_into('<II', hdr, 6, index, start_lba)
-    struct.pack_into('<HHH', hdr, 14, count, stored_crc, len(bad_hdd))
-    struct.pack_into('<I', hdr, 20, total)
-    struct.pack_into('<H', hdr, 254, len(bad_flp))
-    for k, lba in enumerate(sorted(bad_hdd)[:MAX_BAD_HDD]):
-        struct.pack_into('<I', hdr, 24 + 4 * k, lba)
-    for k, off in enumerate(sorted(bad_flp)[:MAX_BAD_FLP]):
-        struct.pack_into('<H', hdr, 256 + 2 * k, off)
-    hdr[216:216 + 12] = b'HDDSAVER 2.1'
-    struct.pack_into('<H', hdr, 500, crc16(bytes(hdr[0:500])))
-    img = bytearray(DISK_BYTES)
+    struct.pack_into('<II', hdr, 6, index, total)
+    hdr[20:20 + 12] = b'HDDSAVER 3.0'
+
+    groups = [seq[i:i + DESC_PER_BLOCK] for i in range(0, len(seq), DESC_PER_BLOCK)]
+    pos = HEADER_LBAS * SECTOR
+    desc_total = 0
+    data_total = 0
+    for gi, grp in enumerate(groups):
+        block = bytearray(SECTOR)
+        block[0] = len(grp)
+        datas = []
+        for k, (lba, st) in enumerate(grp):
+            off = 1 + k * ENTRY_SIZE
+            block[off:off + 3] = lba.to_bytes(3, 'little')
+            block[off + 3] = st
+            if has_data(st):
+                block[off + 4] = len(datas)
+                datas.append(fake_sector(lba))
+        struct.pack_into('<H', block, 510, crc16(bytes(block[0:510])))
+        if gi == corrupt_group:
+            block[corrupt_byte] ^= 0xFF
+        img[pos:pos + SECTOR] = block
+        pos += SECTOR
+        desc_total += len(grp)
+        data_total += len(datas)
+        for sec in datas:
+            img[pos:pos + SECTOR] = sec
+            pos += SECTOR
+    struct.pack_into('<HHH', hdr, 14, desc_total, data_total, flp_fail)
+    struct.pack_into('<H', hdr, 510, crc16(bytes(hdr[0:510])))
     img[0:SECTOR] = hdr
-    img[HEADER_LBAS * SECTOR:HEADER_LBAS * SECTOR + count * SECTOR] = stream
     return bytes(img)
 
 
@@ -591,58 +653,86 @@ def cmd_selftest(args):
     then check that run_assembly reconstructs and reports correctly."""
     import tempfile
 
-    total = 6000
-    cap = DISK_CAPACITY                      # 2870
-    s0, s1, s2 = 0, cap, 2 * cap             # disk ranges: 0-2869, 2870-5739, 5740-5999
-    bad_hdd_d0 = {5}
-    bad_flp_d2 = {100}
-    flip_off = 42 * SECTOR + 7               # corruption inside disk1 payload
+    good = lambda lo, hi: [(l, ST_OK) for l in range(lo, hi)]
 
     checks = []
 
-    # scenario A: disks 0+2 present (disk 2 has FINAL flag), plus a corrupt
-    # duplicate variant of disk 0 which must lose against the good one.
+    # scenario A: ONE disk covers a whole (small) drive, with one dead
+    # sector (lba 5, bios error 0x04 logged in its descriptor), one
+    # head-masked sector (lba 1500) and one corrupted descriptor block.
+    # none of those are gaps: every lba is accounted for -> COMPLETE.
+    total_a = 2000
+    seq0 = good(0, total_a)
+    seq0[5] = (5, 0x04)                       # sector not found
+    seq0[1500] = (1500, ST_HEADSKIP)          # head masked this pass
     with tempfile.TemporaryDirectory() as td:
         write = lambda name, data: open(os.path.join(td, name), 'wb').write(data)
-        write('disk_000.raw', make_synthetic_disk(0, s0, total, bad_hdd=bad_hdd_d0))
-        write('disk_000_bad.raw',
-              make_synthetic_disk(0, s0, total, corrupt_byte=flip_off))
-        write('disk_002.raw', make_synthetic_disk(2, s2, total,
-                                                  bad_flp=bad_flp_d2, final=True))
+        write('disk_000.raw', make_v3_disk(0, seq0, total_a, final=True,
+                                           corrupt_group=1, corrupt_byte=400))
         out = os.path.join(td, 'out.img')
         rep = run_assembly(td, out, verbose=False)
         data = open(out, 'rb').read()
 
-        checks.append(('A image size', len(data) == total * SECTOR))
-        spot_ok = True
-        for lba in [0, 1, 4, 100, 2868, 2869]:
-            if data[lba * SECTOR:(lba + 1) * SECTOR] != fake_sector(lba):
-                spot_ok = False
+        checks.append(('A image size', len(data) == total_a * SECTOR))
+        spot_ok = all(
+            data[l * SECTOR:(l + 1) * SECTOR] == fake_sector(l)
+            for l in [0, 1, 4, 6, 999, 1000, 1999])
         checks.append(('A good sectors intact', spot_ok))
-        checks.append(('A bad hdd lba -> BADFILL',
-                       data[5 * SECTOR:6 * SECTOR] == BADFILL))
-        gap_zeroed = all(data[l * SECTOR:(l + 1) * SECTOR] == bytes(SECTOR)
-                         for l in range(s1, 2 * cap))
-        checks.append(('A gap zero-filled', gap_zeroed))
-        checks.append(('A gap reported', rep['gaps'] == [(s1, s2 - 1)]))
-        checks.append(('A valid variant wins', rep['chosen_files'][0] == 'disk_000.raw'))
+        checks.append(('A dead sector left empty',
+                       data[5 * SECTOR:6 * SECTOR] == bytes(SECTOR)))
+        checks.append(('A dead sector error logged',
+                       rep['err_codes'].get(5) == 0x04))
+        checks.append(('A headskip tracked',
+                       1500 in rep['headskipped_lbas']
+                       and data[1500 * SECTOR:(1501) * SECTOR] == bytes(SECTOR)))
+        checks.append(('A no true gaps', rep['gaps'] == []))
         checks.append(('A final flag seen', rep['final_seen']))
-        flp_lba = s2 + list(bad_flp_d2)[0]
-        checks.append(('A bad flp mapped', flp_lba in rep['declared_bad_spots']
-                       and data[flp_lba * SECTOR:(flp_lba + 1) * SECTOR] == BADFILL))
-        checks.append(('A declared bad hdd set', rep['declared_bad_hdd'] == {5}))
-        checks.append(('A suspect only from failed disk', rep['suspect_count'] == 0))
+        checks.append(('A corrupt block detected',
+                       rep['chosen_records'][0]['ev']['blocks_bad'] == 1))
+        checks.append(('A corrupt block data suspect',
+                       rep['suspect_count'] == DESC_PER_BLOCK))
+        checks.append(('A complete despite known-bad', rep['complete']))
 
-    # scenario B: ONLY the corrupt variant of disk 0 -> placed as suspect
+    # scenario B: only disk 0 of two planned disks present, without the
+    # final flag -> the uncovered tail must be reported as a gap and the
+    # status must be INCOMPLETE.
     with tempfile.TemporaryDirectory() as td:
-        with open(os.path.join(td, 'disk_000.raw'), 'wb') as f:
-            f.write(make_synthetic_disk(0, s0, total, corrupt_byte=flip_off))
+        write = lambda name, data: open(os.path.join(td, name), 'wb').write(data)
+        write('disk_000.raw', make_v3_disk(0, good(0, 2000), 3000))
         out = os.path.join(td, 'out.img')
         rep = run_assembly(td, out, verbose=False)
-        data = open(out, 'rb').read()
-        checks.append(('B suspect counted', rep['suspect_count'] == min(cap, total)))
-        got = data[(s0 + 42) * SECTOR + 7]
-        checks.append(('B corrupted byte preserved', got == (fake_sector(42)[7] ^ 0xFF)))
+        checks.append(('B tail reported as gap',
+                       rep['gaps'] == [(2000, 2999)]))
+        checks.append(('B incomplete without final flag',
+                       rep['complete'] is False))
+
+    # scenario C: same range dumped twice - once with a corrupt descriptor
+    # block (data lands as suspect), then cleanly. the clean dump must
+    # upgrade every suspect sector.
+    total_c = 2000
+    seq3 = good(500, 1500)
+    with tempfile.TemporaryDirectory() as td:
+        write = lambda name, data: open(os.path.join(td, name), 'wb').write(data)
+        write('disk_000.raw', make_v3_disk(0, seq3, total_c,
+                                           corrupt_group=0, corrupt_byte=200))
+        write('disk_001.raw', make_v3_disk(1, seq3, total_c))
+        out = os.path.join(td, 'out.img')
+        rep = run_assembly(td, out, verbose=False)
+
+        checks.append(('C upgrade happened', rep['upgrades'] > 0))
+        checks.append(('C no suspects remain', rep['suspect_count'] == 0))
+        checks.append(('C overlap counted', rep['overlaps'] == [(1, len(seq3))]))
+
+    # scenario D: bit rot inside the header sector must reject the whole
+    # dump (the header crc covers it).
+    with tempfile.TemporaryDirectory() as td:
+        img = bytearray(make_v3_disk(0, good(0, 100), 2000))
+        img[123] ^= 0xFF                          # inside header, below crc
+        with open(os.path.join(td, 'disk_000.raw'), 'wb') as f:
+            f.write(bytes(img))
+        candidates, rejected, _totals = load_dumps(td)
+        checks.append(('D bad header rejected', len(candidates) == 0
+                       and len(rejected) == 1))
 
     print()
     failed = False
@@ -675,29 +765,27 @@ def cmd_mkpattern(args):
           % (args.out, args.total, args.total * SECTOR, time.time() - t0))
 
 
-def coverage_and_declared(dumps_dir, total):
-    """Covered-LBA map + declared-bad set from the chosen dump per disk index."""
+def load_placement(dumps_dir, total):
+    """Covered-LBA map, error map and headskip set, merged across ALL dumps."""
     candidates, rejected, totals = load_dumps(dumps_dir)
     covered = bytearray(total)
-    declared = set()
-    n = 0
-    for idx in sorted(candidates):
-        recs = sorted(candidates[idx],
-                      key=lambda r: (not r['ev']['crc_ok'], r['file']))
-        info = recs[0]['ev']['info']
-        s, c = info['start_lba'], info['count']
-        if s < total:
-            m = min(c, total - s)
-            covered[s:s + m] = b'\x01' * m
-        for b in info['bad_hdd']:
-            if b < total:
-                declared.add(b)
-        for off in info['bad_flp']:
-            lba = s + off
-            if 0 <= lba < total:
-                declared.add(lba)
-        n += 1
-    return covered, declared, n
+    errs = {}
+    skips = set()
+    ndisks = 0
+    for lst in candidates.values():
+        for rec in lst:
+            ndisks += 1
+            for g in rec['ev']['groups']:
+                for lba, st, didx in g['entries']:
+                    if lba >= total:
+                        continue
+                    if has_data(st):
+                        covered[lba] = 1
+                    elif st == ST_HEADSKIP:
+                        skips.add(lba)
+                    else:
+                        errs.setdefault(lba, st)
+    return covered, errs, skips, ndisks
 
 
 def cmd_verify(args):
@@ -706,19 +794,10 @@ def cmd_verify(args):
         print('WARNING: image size %d not a multiple of %d'
               % (len(data), SECTOR))
     total_img = min(len(data) // SECTOR, args.total)
-    covered, declared, ndisks = coverage_and_declared(args.dumps, args.total)
+    covered, errs, skips, ndisks = load_placement(args.dumps, args.total)
     zero = bytes(SECTOR)
-    first_cov = next((l for l in range(total_img)
-                      if covered[l]), None)
-    if first_cov is not None:
-        g = data[first_cov * SECTOR:(first_cov + 1) * SECTOR]
-        if g not in (pattern_sector(first_cov), zero, BADFILL):
-            sys.exit('This image contains real drive data (LBA %d). '
-                     '"verify" only works against "mkpattern" fake '
-                     'drives; use "assemble" and "badmap" for real '
-                     'dumps.' % first_cov)
-    tallies = {'ok': 0, 'bad-declared': 0, 'missing': 0,
-               'zero-unexpected': 0, 'skipped-unlogged': 0, 'MISMATCH': 0}
+    tallies = {'ok': 0, 'readerror-declared': 0, 'headskipped': 0,
+               'missing': 0, 'MISMATCH': 0}
     samples = {}
 
     def note(cls, lba):
@@ -728,8 +807,13 @@ def cmd_verify(args):
 
     for lba in range(total_img):
         got = data[lba * SECTOR:(lba + 1) * SECTOR]
-        if not covered[lba]:
-            # nothing was dumped here: only zeros are acceptable
+        if lba in errs:
+            tallies['readerror-declared'] += 1
+            note('readerror-declared', lba)
+        elif lba in skips:
+            tallies['headskipped'] += 1
+            note('headskipped', lba)
+        elif not covered[lba]:
             if got == zero:
                 tallies['missing'] += 1
             else:
@@ -737,13 +821,6 @@ def cmd_verify(args):
                 note('MISMATCH', lba)
         elif got == pattern_sector(lba):
             tallies['ok'] += 1
-        elif got == BADFILL:
-            cls = 'bad-declared' if lba in declared else 'skipped-unlogged'
-            tallies[cls] += 1
-            note(cls, lba)
-        elif got == zero:
-            tallies['zero-unexpected'] += 1
-            note('zero-unexpected', lba)
         else:
             tallies['MISMATCH'] += 1
             note('MISMATCH', lba)
@@ -756,10 +833,7 @@ def cmd_verify(args):
         if samples.get(k):
             line += '   e.g. LBA ' + ', '.join(map(str, samples[k][:6]))
         print(line)
-    # exact BADFILL sectors were put there by the tool on purpose (it
-    # substitutes before crc), so unlogged ones are normal when a disk
-    # had more than 48 bad hdd / 30 flp spots - only true anomalies fail
-    bad = tallies['MISMATCH'] or tallies['zero-unexpected']
+    bad = tallies['MISMATCH']
     if bad:
         verdict = 'FAILED'
     elif tallies['missing']:
@@ -769,83 +843,51 @@ def cmd_verify(args):
     print('\nVERIFY %s' % verdict)
     sys.exit(1 if bad else 0)
 
-
 # ------------------------------------------------------------ bad sector map
 
 MAP_COLORS = {
-    0: '#bdbdbd',   # never dumped
+    0: '#bdbdbd',   # never attempted
     1: '#2ea44f',   # readable
-    2: '#d93025',   # hdd read failed -> BADFILL
-    3: '#e08a00',   # hdd read ok, floppy write failed -> recoverable by rerun
-    4: '#7a1010',   # BADFILL found but beyond the per-disk header log limit
+    2: '#d93025',   # hdd read failed (bios error logged in descriptor)
+    3: '#e08a00',   # head masked out this pass, awaiting another run
 }
-MAP_NAMES = {0: 'not dumped', 1: 'readable', 2: 'hdd read failed',
-             3: 'floppy write failed', 4: 'skipped, unlogged (>48)'}
+MAP_NAMES = {0: 'not attempted', 1: 'readable', 2: 'hdd read failed',
+             3: 'head masked'}
 
 
 def build_badmap_state(dumps_dir, cyls, heads, spt):
     """Per-LBA state byte + counters, merged across ALL dumps.
 
-    The 286 tool logs at most 48 hdd-bad and 30 flp-bad spots per disk
-    in the floppy header; anything beyond that is still BADFILLed in
-    the payload, so it is detected here by scanning the sector data.
-
-    Overlapping dumps are merged per sector with priority: real data
-    beats a failed attempt. A later dump that recovered a sector an
-    earlier one gave up on therefore shows as readable.
+    Priority per lba: readable beats everything (a later pass may have
+    recovered it); otherwise a logged bios error; otherwise head-skip;
+    otherwise untouched.
     """
     candidates, rejected, totals = load_dumps(dumps_dir)
     total = cyls * heads * spt
     state = bytearray(total)          # 0 = untouched
     recs = [r for lst in candidates.values() for r in lst]
-    nh = nf = nu = 0
-    seen_hdd = set()
-    seen_flp = set()
+    nerr = 0
     for rec in recs:
-        info = rec['ev']['info']
-        pl = rec['ev']['payload']
-        s = info['start_lba']
-        c = min(info['count'], max(0, total - s))
-        for j in range(c):
-            lba = s + j
-            sec = pl[j * SECTOR:(j + 1) * SECTOR]
-            if sec not in (BADFILL, HEADSKIP):
-                state[lba] = 1        # real data wins over everything
-        for b in info['bad_hdd']:
-            if b < total and b not in seen_hdd:
-                seen_hdd.add(b)
-                nh += 1
-        for off in info['bad_flp']:
-            lba = s + off
-            if 0 <= lba < total and lba not in seen_flp:
-                seen_flp.add(lba)
-                nf += 1
-    for rec in recs:
-        info = rec['ev']['info']
-        pl = rec['ev']['payload']
-        s = info['start_lba']
-        c = min(info['count'], max(0, total - s))
-        for b in info['bad_hdd']:
-            if b < total and state[b] != 1:
-                state[b] = 2
-        for off in info['bad_flp']:
-            lba = s + off
-            if 0 <= lba < total and state[lba] != 1:
-                state[lba] = 3
-        for j in range(c):
-            lba = s + j
-            sec = pl[j * SECTOR:(j + 1) * SECTOR]
-            if state[lba] == 0 and sec == HEADSKIP:
-                continue              # stays 'not dumped'
-            if state[lba] == 0 and sec == BADFILL:
-                state[lba] = 4
-                nu += 1
-    return state, nh, nf, nu, len(recs)
+        for g in rec['ev']['groups']:
+            for lba, st, _didx in g['entries']:
+                if lba >= total:
+                    continue
+                if has_data(st):
+                    state[lba] = 1
+                elif st == ST_HEADSKIP:
+                    if state[lba] == 0:
+                        state[lba] = 3
+                else:
+                    if state[lba] < 2:
+                        state[lba] = 2
+    nerr = sum(1 for l in range(total) if state[l] == 2)
+    nskip = sum(1 for l in range(total) if state[l] == 3)
+    return state, nerr, nskip, len(recs)
 
 
 def cmd_badmap(args):
     C, H, S = args.cyls, args.heads, args.spt
-    state, nh, nf, nu, ndisks = build_badmap_state(args.dumps, C, H, S)
+    state, nerr, nskip, ndisks = build_badmap_state(args.dumps, C, H, S)
     CW, CH = 3, 12                    # pixel size of one sector cell
     ML, MT = 56, 78                   # left margin / top offset
     panel_gap, tick_h = 18, 14
@@ -860,17 +902,16 @@ def cmd_badmap(args):
            '<text x="%d" y="24" font-size="15">Tandon HDD bad-sector map '
            '(from %d floppies)</text>' % (ML, ndisks)]
     lx = ML
-    for st in (1, 2, 4, 3, 0):
+    for st in (1, 2, 3, 0):
         out.append('<rect x="%d" y="36" width="12" height="12" fill="%s"/>'
                    % (lx, MAP_COLORS[st]))
         out.append('<text x="%d" y="46" font-size="11" fill="#222">%s</text>'
                    % (lx + 16, MAP_NAMES[st]))
         lx += 16 + len(MAP_NAMES[st]) * 7 + 20
-    cnt = [state.count(i) for i in range(5)]
+    cnt = [state.count(i) for i in range(4)]
     out.append('<text x="%d" y="66" font-size="11" fill="#222">'
-               '%d readable | %d hdd-bad | %d skipped-unlogged | '
-               '%d flp-bad | %d not dumped'
-               '</text>' % (ML, cnt[1], cnt[2], cnt[4], cnt[3], cnt[0]))
+               '%d readable | %d read-failed | %d head-masked | %d not attempted'
+               '</text>' % (ML, cnt[1], cnt[2], cnt[3], cnt[0]))
 
     for h in range(H):
         y0 = MT + h * (panel_h + panel_gap)
@@ -901,15 +942,15 @@ def cmd_badmap(args):
     with open(args.out, 'w') as f:
         f.write('\n'.join(out))
     print('wrote %s' % args.out)
-    per = [[0, 0, 0, 0, 0] for _ in range(H)]
+    per = [[0, 0, 0, 0] for _ in range(H)]
     for lba, st in enumerate(state):
         per[(lba // S) % H][st] += 1
-    print('per head:  ok / hdd-bad / unlogged / flp-bad / not-dumped')
+    print('per head:  ok / read-failed / head-masked / not-attempted')
     for h in range(H):
         p = per[h]
-        print('  head %d: %6d / %5d / %5d / %5d / %6d'
-              % (h, p[1], p[2], p[4], p[3], p[0]))
-    if nh or nf:
+        print('  head %d: %6d / %5d / %5d / %6d'
+              % (h, p[1], p[2], p[3], p[0]))
+    if nerr:
         print('\nreading tip: failure runs ending right before multiples '
               'of %d (track boundaries)\nlook like format-time defect '
               'sparing, random scatter looks like decay.' % S)
@@ -967,6 +1008,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-
-
-

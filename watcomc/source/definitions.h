@@ -33,18 +33,28 @@
 #define FLPD_TOTAL_SECTORS (FLPD_CYLS*FLPD_HEADS*FLPD_SPT)
 
 /* each floppy starts with 10 reserved sectors (the header sector
-   plus padding), the remaining capacity carries payload */
+   plus padding), the remaining capacity carries groups of descriptor
+   blocks + their data sectors */
 #define HEADER_LBAS 10
-#define DISK_CAPACITY (FLPD_TOTAL_SECTORS-HEADER_LBAS)
+
+/* how many hdd sectors one floppy can roughly hold in the v3 format:
+   payload slots shrunk by the descriptor-block overhead (one block
+   sector per BATCH_SECTORS data sectors). this is only good enough
+   for the disk-number suggestion at startup and the time estimate;
+   the real capacity depends on how many sectors get skipped, because
+   unreadable sectors cost a descriptor (5 bytes) but no data slot */
+#define APPROX_DISK_CAPACITY \
+  ((unsigned long)(FLPD_TOTAL_SECTORS-HEADER_LBAS)*BATCH_SECTORS/(BATCH_SECTORS+1))
 
 /* ---- retry and error handling policy ---- */
-#define BATCH_SECTORS 26        /* one full hdd track per ram buffer */
+#define BATCH_SECTORS 26        /* one full hdd track per ram buffer; also
+                                   the number of descriptors per descriptor
+                                   block, see DESC_PER_BLOCK */
+#define DESC_PER_BLOCK BATCH_SECTORS  /* descriptors carried by one descriptor
+                                         block sector = one batch/track */
 #define RETRY_HDD 16            /* read attempts per hdd sector */
 #define RETRY_FLOPPY 4          /* write attempts per round */
 #define REWRITE_ROUNDS 5        /* floppy: up to RETRY_FLOPPY*REWRITE_ROUNDS attempts per sector */
-#define MAX_BAD 48              /* must match header layout space */
-#define MAX_BAD_ALL 64
-#define MAX_BAD_FLP 30          /* must match header layout space */
-#define DISK_BAD_LIMIT 10       /* this many floppy failures = ask for fresh disk */
+#define MAX_BAD_ALL 64          /* session-wide bad lba log for the summary */
 
 #endif
