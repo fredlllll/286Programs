@@ -5,7 +5,7 @@
 #include "util.h"
 #include "keyboard.h"
 #include "print.h"
-#include <i86.h<
+#include <i86.h>
 
 struct ProgramState prgState;
 
