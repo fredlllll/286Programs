@@ -21,8 +21,9 @@ void crcInit(void);
 uint16_t crcBuf(uint16_t crc, uint8_t* p, uint16_t n);
 
 /* compares two 512 byte sector buffers, returns 0 if identical,
-   nonzero otherwise */
-uint8_t memcmpBuf(uint8_t* a, uint8_t* b);
+   nonzero otherwise. far pointers so a floppy verify can compare a
+   dgroup stack buffer against data in the far sector arena */
+uint8_t memcmpBuf(uint8_t __far *a, uint8_t __far *b);
 
 /* reads the bios tick counter: memory at 0040:006C that the timer
    interrupt increments ~18.2 times per second since midnight.

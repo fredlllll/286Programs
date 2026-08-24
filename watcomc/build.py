@@ -11,10 +11,15 @@
 #   floppy image ready to write to a disk with rawritewin/imagedisk/etc.
 
 import os
+import re
 import sys
 
 SOURCE_DIR = "source"
 OBJ_DIR = "obj"
+
+# must mirror ARENA_SEG in source/program.c: linear start of the far
+# data arena. the flat image (code + dgroup) has to stay below it.
+ARENA_SEG = 0x1000
 
 WCC_FLAGS = "-2 -d0 -wx -ms -s -zl -i="+SOURCE_DIR
 # compiler flags:
@@ -59,9 +64,33 @@ def compile_source(name):
 #   order ...           : segment placement; keeps main's segment first
 def link_main(names):
     objs = ",".join(os.path.join(OBJ_DIR, n+".obj") for n in names)
-    result = os.system("wlink file "+objs+" format raw bin name "+os.path.join(OBJ_DIR,"main.bin")+" option NODEFAULTLIBS,verbose,start=main_,OFFSET=0x7E00 order clname CODE SEGMENT start_segment")
+    result = os.system("wlink file "+objs+" format raw bin name "+os.path.join(OBJ_DIR,"main.bin")+" option NODEFAULTLIBS,verbose,start=main_,OFFSET=0x7E00,map="+os.path.join(OBJ_DIR,"main.map")+" order clname CODE SEGMENT start_segment")
     if result != 0:
         sys.exit("\r\nfailed to link main.bin")
+    check_memory_layout()
+
+# the program runs with all segment registers = 0 and 16-bit offsets,
+# so everything the linker lays out (code + dgroup) must end below
+# the 64k line AND below the far data arena. wlink will NOT warn if
+# objects silently alias low memory after offset wraparound, so this
+# check is the only line of defense - see the arena comment in
+# source/program.c for background
+def check_memory_layout():
+    dgroup = None
+    with open(os.path.join(OBJ_DIR,"main.map")) as f:
+        for line in f:
+            m = re.match(r"^DGROUP\s+([0-9A-Fa-f]{8})\s+([0-9A-Fa-f]{8})", line)
+            if m:
+                dgroup = (int(m.group(1),16), int(m.group(2),16))
+    if dgroup is None:
+        sys.exit("memory layout check: no DGROUP found in main.map")
+    base, size = dgroup
+    end = base + size
+    print("\r\ndgroup: linear 0x%05X..0x%05X (%d bytes)" % (base, end-1, size))
+    if end > ARENA_SEG << 4:
+        sys.exit("memory layout check: image ends at 0x%X, overlapping the far arena at 0x%X" % (end, ARENA_SEG << 4))
+    if end > 0x10000:
+        sys.exit("memory layout check: image ends at 0x%X, past the 16-bit offset ceiling 0x10000" % end)
 
 def process_sources():
     if not os.path.isdir(SOURCE_DIR):

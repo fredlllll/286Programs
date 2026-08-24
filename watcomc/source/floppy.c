@@ -14,7 +14,7 @@ void advanceFloppyPosition(void)
   stepChs(&floppyPosition, &floppyGeometry);
 }
 
-uint8_t writeVerified(void *src)
+uint8_t writeVerified(void __far *src)
 {
   if (writeFloppyAuto(src))
   {
@@ -34,7 +34,7 @@ void seekFloppy(uint16_t c, uint8_t h, uint8_t s)
   floppyPosition = tmp;
 }
 
-uint8_t writeFloppy(uint16_t c, uint8_t h, uint8_t s, void *src)
+uint8_t writeFloppy(uint16_t c, uint8_t h, uint8_t s, void __far *src)
 {
   uint8_t rounds;
   uint8_t tries;
@@ -58,7 +58,7 @@ uint8_t writeFloppy(uint16_t c, uint8_t h, uint8_t s, void *src)
     {
       /* write claimed success - now prove it */
       status = readFromDrive(1, c, h, s, 0, verifyBuf);
-      if (status == 0 && memcmpBuf(src, verifyBuf) == 0)
+      if (status == 0 && memcmpBuf(src, (uint8_t __far *)verifyBuf) == 0)
       {
         return 0;
       }
@@ -95,7 +95,7 @@ uint8_t writeFloppy(uint16_t c, uint8_t h, uint8_t s, void *src)
    for now is "assume writes work" - they have so far, thanks to the
    aggressive retry above. if this ever bites, the fix is to seek
    back and rewrite the descriptor block with a failure status */
-uint8_t writeFloppyAuto(void *src)
+uint8_t writeFloppyAuto(void __far *src)
 {
   return writeFloppy(floppyPosition.cyl, floppyPosition.head, floppyPosition.sec, src);
 }

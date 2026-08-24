@@ -75,7 +75,7 @@ uint16_t crcBuf(uint16_t crc, uint8_t* p, uint16_t n){
 
 /* sector sized compare, used to verify a floppy write by reading the
    sector back and comparing against what we intended to write */
-uint8_t memcmpBuf(uint8_t* a, uint8_t* b){
+uint8_t memcmpBuf(uint8_t __far *a, uint8_t __far *b){
   uint16_t i;
   for(i = 0; i < 512; i++){
     if(a[i] != b[i]){

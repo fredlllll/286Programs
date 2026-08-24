@@ -48,11 +48,14 @@ void resetDiskSystem(void);
 
 /* reads numSectorsToRead consecutive sectors starting at the given
    chs position into destination. returns 0 on success, otherwise the
-   bios error code (see printInt13Status) */
-uint8_t readFromDrive(uint8_t numSectorsToRead, uint16_t cylinder, uint8_t head, uint8_t sector, uint8_t driveNumber, void* destination);
+   bios error code (see printInt13Status). destination is a far
+   pointer because transfers must be doable to/from the high arena
+   above the 64k line too (see program.c); ordinary near objects are
+   promoted automatically since ds = 0 */
+uint8_t readFromDrive(uint8_t numSectorsToRead, uint16_t cylinder, uint8_t head, uint8_t sector, uint8_t driveNumber, void __far *destination);
 
 /* same as readFromDrive but writes */
-uint8_t writeToDrive(uint8_t numSectorsToWrite, uint16_t cylinder, uint8_t head, uint8_t sector, uint8_t driveNumber, void* source);
+uint8_t writeToDrive(uint8_t numSectorsToWrite, uint16_t cylinder, uint8_t head, uint8_t sector, uint8_t driveNumber, void __far *source);
 
 /* human readable text for a bios int 13h status/error code */
 void printInt13Status(uint8_t status);

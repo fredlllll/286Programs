@@ -38,7 +38,7 @@ uint8_t isStatusSuccess(uint8_t status)
    given up after every attempt. a dead sector does NOT get dumped:
    its lba and the error code land in the next descriptor block and
    the dump carries on - one bad sector costs 5 bytes, not 512 */
-uint8_t readHddResilient(void *dest)
+uint8_t readHddResilient(void __far *dest)
 {
   uint8_t tries;
   uint8_t status;

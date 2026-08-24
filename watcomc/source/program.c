@@ -4,6 +4,7 @@
 #include "util.h"
 #include "keyboard.h"
 #include "print.h"
+#include <i86.h>
 
 void ensureStartLbaLimit(uint32_t startLba)
 {
@@ -83,7 +84,45 @@ static void progressLine(void)
     printDecLong(hddGeom.totalSectors);
 }
 
+/* one 512 byte sector of raw data */
+struct Sector
+{
+    uint8_t data[512];
+};
+
+/* sector currently being filled by the hdd read path. small enough
+   to live in dgroup like every other global */
 struct Sector hddReadBuffer;
+
+/* ---- far data arena ----
+
+   the dump buffers a whole descriptor block worth of data sectors
+   before writing them out (DESC_PER_BLOCK * 512 bytes). that does
+   not fit below the 64k line together with code, stack and all
+   other data - and in this flat setup (all segment registers 0,
+   raw binary image) the linker cannot even express objects in a
+   second segment: wlink rejects far relocations with "invalid
+   relocation for flat memory model".
+
+   so the arena is not a c object at all. it is a fixed region of
+   free conventional memory high above the image, addressed through
+   explicitly constructed far pointers. physical layout:
+
+     0x00000..0x003FF  interrupt vector table (untouched)
+     0x07C00           bootloader + stack growing down from 0x7C00
+     0x07E00..         this program: code + dgroup, must stay < 64k
+     0x10000..0x1C7FF  arena: DESC_PER_BLOCK sector slots
+                       (segment 0x1000, offsets 0..0xC7FF)
+
+   nothing else occupies that range at boot; keep ARENA_SEG in sync
+   with build.py, which asserts dgroup really ends below it */
+#define ARENA_SEG 0x1000
+
+static struct Sector __far *dataSlot(uint8_t idx)
+{
+    return (struct Sector __far *)MK_FP(ARENA_SEG,
+                                        (unsigned int)idx * sizeof(struct Sector));
+}
 
 #define DATAIDXNOTWRITTEN 255
 /* ---- one sector descriptor: the ID card of a single hdd sector ----
@@ -127,13 +166,6 @@ struct DescBlock
 
 uint8_t currentDataIdx = 0;
 
-struct Sector
-{
-    uint8_t data[512];
-};
-
-struct Sector descriptorDataBuffer[DESC_PER_BLOCK];
-
 void writeOutBufferedData(void)
 {
     uint8_t i;
@@ -163,7 +195,7 @@ void writeOutBufferedData(void)
             uint8_t dataIdx = currentDescriptorHeader.desc[i].dataIdx;
             if (dataIdx != DATAIDXNOTWRITTEN)
             {
-                err += writeVerified(&descriptorDataBuffer[dataIdx]);
+                err += writeVerified(dataSlot(dataIdx));
             }
         }
         if (!err)
@@ -186,7 +218,7 @@ void addDescriptor(uint32_t lba, uint8_t status)
     {
         // write descriptor and data
         newDesc.dataIdx = currentDataIdx++;
-        descriptorDataBuffer[newDesc.dataIdx] = hddReadBuffer;
+        *dataSlot(newDesc.dataIdx) = hddReadBuffer;
     }
     else
     {

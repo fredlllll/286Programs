@@ -37,7 +37,8 @@ uint8_t isStatusSuccess(uint8_t status);
    status: 0 = clean read, 0x11 = read but ecc-corrected (both are
    good data), anything else = unreadable, dest content undefined
    and NOT to be dumped; caller records the code in the sector
-   descriptor instead */
-uint8_t readHddResilient(void *dest);
+   descriptor instead. dest is a far pointer (see int13.h); the near
+   hddReadBuffer converts automatically */
+uint8_t readHddResilient(void __far *dest);
 
 #endif

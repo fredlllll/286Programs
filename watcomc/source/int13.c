@@ -31,7 +31,11 @@ void resetDiskSystem(void){
          & 0xC0 keeps exactly those two
      cl bits 0..5 get the sector number
    or-ing the three pieces together yields the value for cx */
-uint8_t readFromDrive(uint8_t numSectorsToRead, uint16_t cylinder, uint8_t head, uint8_t sector, uint8_t driveNumber, void* destination){
+/* the destination/source is a far pointer: es:bx must address it for
+   the bios transfer, so both halves are loaded explicitly instead of
+   relying on es staying 0. this is what lets the big sector buffers
+   live in their own segment above the 64k line */
+uint8_t readFromDrive(uint8_t numSectorsToRead, uint16_t cylinder, uint8_t head, uint8_t sector, uint8_t driveNumber, void __far *destination){
   volatile uint8_t status;
   uint16_t myCx = (cylinder << 8) | ((cylinder>>2)& 0xC0) | sector;
   _asm {
@@ -40,14 +44,15 @@ uint8_t readFromDrive(uint8_t numSectorsToRead, uint16_t cylinder, uint8_t head,
     mov cx, myCx       ; cylinder + sector, see comment above
     mov dh, head
     mov dl, driveNumber
-    mov bx, destination
+    mov bx, word ptr [destination]
+    mov es, word ptr [destination + 2]
     int 0x13
     mov status, ah     ; on return ah holds 0 or an error code
   };
   return status;
 }
 
-uint8_t writeToDrive(uint8_t numSectorsToWrite, uint16_t cylinder, uint8_t head, uint8_t sector, uint8_t driveNumber, void* source){
+uint8_t writeToDrive(uint8_t numSectorsToWrite, uint16_t cylinder, uint8_t head, uint8_t sector, uint8_t driveNumber, void __far *source){
   volatile uint8_t status;
   uint16_t myCx = (cylinder << 8) | ((cylinder>>2)& 0xC0) | sector;
   _asm {
@@ -56,7 +61,8 @@ uint8_t writeToDrive(uint8_t numSectorsToWrite, uint16_t cylinder, uint8_t head,
     mov cx, myCx
     mov dh, head
     mov dl, driveNumber
-    mov bx, source
+    mov bx, word ptr [source]
+    mov es, word ptr [source + 2]
     int 0x13
     mov status, ah
   };
