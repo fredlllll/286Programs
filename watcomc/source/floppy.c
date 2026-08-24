@@ -9,13 +9,12 @@
 const struct Geometry floppyGeometry = {FLOPPY_CYLS, FLOPPY_HEADS, FLOPPY_SPT, FLOPPY_TOTAL_SECTORS};
 struct ChsWithLBA floppyPosition = {0, 0, 1, 0};
 
-
 void advanceFloppyPosition(void)
 {
   stepChs(&floppyPosition, &floppyGeometry);
 }
 
-uint8_t writeVerified(uint8_t *src)
+uint8_t writeVerified(void *src)
 {
   if (writeFloppyAuto(src))
   {
@@ -27,11 +26,15 @@ uint8_t writeVerified(uint8_t *src)
 
 void seekFloppy(unsigned int c, unsigned char h, unsigned char s)
 {
-  struct ChsWithLBA tmp = {c, h, s, ChsToLba(c, h, s)};
+  struct ChsWithLBA tmp;
+  tmp.cyl = c;
+  tmp.head = h;
+  tmp.sec = s;
+  tmp.lba = ChsToLba(c, h, s);
   floppyPosition = tmp;
 }
 
-uint8_t writeFloppy(uint16_t c, uint8_t h, uint8_t s, uint8_t *src)
+uint8_t writeFloppy(uint16_t c, uint8_t h, uint8_t s, void *src)
 {
   unsigned char rounds;
   unsigned char tries;
@@ -92,7 +95,7 @@ uint8_t writeFloppy(uint16_t c, uint8_t h, uint8_t s, uint8_t *src)
    for now is "assume writes work" - they have so far, thanks to the
    aggressive retry above. if this ever bites, the fix is to seek
    back and rewrite the descriptor block with a failure status */
-unsigned char writeFloppyAuto(unsigned char *src)
+unsigned char writeFloppyAuto(void *src)
 {
   return writeFloppy(floppyPosition.cyl, floppyPosition.head, floppyPosition.sec, src);
 }

@@ -16,6 +16,7 @@
    print.h gets the same inline expansion */
 #ifndef PRINT_H
 #define PRINT_H
+#include "intdef.h"
 
 void printChar(unsigned char inChar, unsigned short pageAndColor);
 #pragma aux printChar = \
@@ -28,11 +29,11 @@ void printChar(unsigned char inChar, unsigned short pageAndColor);
 void print(const char* text);
 
 /* hex output, most significant digit first */
-void printHex(unsigned char value);         /* 2 digits  */
-void printHexShort(unsigned short value);   /* 4 digits  */
-void printHexLong(unsigned long value);     /* 8 digits  */
+void printHex(uint8_t value);         /* 2 digits  */
+void printHexShort(uint16_t value);   /* 4 digits  */
+void printHexLong(uint32_t value);     /* 8 digits  */
 
 /* decimal output without leading zeros */
-void printDecLong(unsigned long value);
+void printDecLong(uint32_t value);
 
 #endif

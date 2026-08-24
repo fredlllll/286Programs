@@ -57,8 +57,6 @@
 #include "program.h"
 
 
-
-
 /* ------------------------- entry */
 
 void _cstart(void){
@@ -72,10 +70,6 @@ void _cstart(void){
    states halt the cpu */
 #pragma code_seg ( "start_segment" )
 void main(void){
-  unsigned long startLBA;
-  unsigned long v;
-  unsigned int i;
-  unsigned int biosCyls;
 
   crcInit();
 

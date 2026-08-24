@@ -13,7 +13,7 @@ extern const struct Geometry hddGeom;
 /* current read position on the hdd. main() saves/restores it around
    each disk so an aborted disk can be retried at the same spot.
    hddLBA is kept alongside because it is what goes into the header */
-extern struct ChsWithLBA hddPos = {0, 0, 1, 0};
+extern struct ChsWithLBA hddPos;
 
 /* read retry policy: attempts per hdd sector (0 = give up after one) */
 extern uint8_t hddRetries;
@@ -38,6 +38,6 @@ uint8_t isStatusSuccess(uint8_t status);
    good data), anything else = unreadable, dest content undefined
    and NOT to be dumped; caller records the code in the sector
    descriptor instead */
-uint8_t readHddResilient(uint8_t *dest);
+uint8_t readHddResilient(void *dest);
 
 #endif

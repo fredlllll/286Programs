@@ -10,10 +10,10 @@ extern const struct Geometry floppyGeometry;
 extern struct ChsWithLBA floppyPosition;
 
 void advanceFloppyPosition(void);
-uint8_t writeVerified(uint8_t *src);
+uint8_t writeVerified(void *src);
 void seekFloppy(unsigned int c, unsigned char h, unsigned char s);
-uint8_t writeFloppy(uint16_t c, uint8_t h, uint8_t s, uint8_t *src);
-unsigned char writeFloppyAuto(unsigned char *src);
+uint8_t writeFloppy(uint16_t c, uint8_t h, uint8_t s, void *src);
+unsigned char writeFloppyAuto(void *src);
 
 #define SECTOR_STATUS_OK 0             /* read clean, data present */
 #define SECTOR_STATUS_ECC 0x11         /* read after ecc correction, data present */

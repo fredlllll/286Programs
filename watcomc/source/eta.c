@@ -1,4 +1,6 @@
 #include "definitions.h"
+#include "math.h"
+#include "print.h"
 
 /* append estimated time until this disk finishes, based on pace so far.
    done = hdd sectors attempted on this disk. stays in tick units as

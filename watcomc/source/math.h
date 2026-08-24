@@ -1,6 +1,7 @@
 /* 32 bit helpers that avoid watcom runtime calls (__U4M/__U4D) */
 #ifndef MATH_H
 #define MATH_H
+#include "intdef.h"
 
 /* multiplies a 32 bit by a 16 bit value, returns 32 bit result.
    hand rolled because the compiler would otherwise call a helper

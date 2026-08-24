@@ -3,6 +3,16 @@
 #include "programState.h"
 #include "util.h"
 #include "keyboard.h"
+#include "print.h"
+
+void ensureStartLbaLimit(uint32_t startLba)
+{
+    if (startLba >= hddGeom.totalSectors)
+    {
+        print("Start LBA beyond end of drive.\r\nProgram halted.\r\n");
+        halt();
+    }
+}
 
 void printProgramStart(void)
 {
@@ -24,6 +34,7 @@ void collectProgramInput(void)
     /* every prompt shows the compiled-in default in brackets; typing
      nothing (just enter) accepts it */
     unsigned long v;
+    uint32_t startLba;
     v = decInput("Hdd read retries", hddRetries);
     if (v <= 255)
     {
@@ -55,7 +66,7 @@ void collectProgramInput(void)
     /* resuming: the lba where the previous run stopped becomes the
      starting point; its disk number is derived from how many full
      disks worth of sectors fit before it */
-    uint32_t startLba = decInput("Resume at hdd LBA", 0);
+    startLba = decInput("Resume at hdd LBA", 0);
     ensureStartLbaLimit(startLba);
     seekHdd(startLba);
     // TODO: startslba is used to calculate ETA
@@ -66,20 +77,10 @@ void collectProgramInput(void)
    time estimate */
 static void progressLine(void)
 {
-    unsigned long now;
     print("LBA:");
     printDecLong(hddPos.lba);
     print("/");
     printDecLong(hddGeom.totalSectors);
-}
-
-void ensureStartLbaLimit(uint32_t startLba)
-{
-    if (startLba >= hddGeom.totalSectors)
-    {
-        print("Start LBA beyond end of drive.\r\nProgram halted.\r\n");
-        halt();
-    }
 }
 
 struct Sector hddReadBuffer;
@@ -135,10 +136,11 @@ struct Sector descriptorDataBuffer[DESC_PER_BLOCK];
 
 void writeOutBufferedData(void)
 {
+    uint8_t i;
     // write out and reset
     // TODO: crc
     uint8_t neededSectors = 1;
-    for (uint8_t i = 0; i < currentDescriptorHeader.count; i++)
+    for (i = 0; i < currentDescriptorHeader.count; i++)
     {
         if (currentDescriptorHeader.desc[i].dataIdx != DATAIDXNOTWRITTEN)
         {
@@ -156,7 +158,7 @@ void writeOutBufferedData(void)
     {
         uint8_t err = 0;
         err += writeVerified(&currentDescriptorHeader);
-        for (uint8_t i = 0; i < currentDescriptorHeader.count; ++i)
+        for (i = 0; i < currentDescriptorHeader.count; ++i)
         {
             uint8_t dataIdx = currentDescriptorHeader.desc[i].dataIdx;
             if (dataIdx != DATAIDXNOTWRITTEN)
@@ -200,9 +202,9 @@ void addDescriptor(uint32_t lba, uint8_t status)
 
 void processFloppy(void)
 {
-    currentDescriptorHeaderFloppyLba = 0;
-    uint32_t diskStartTicks = biosTicks();
+    //uint32_t diskStartTicks = biosTicks();
     uint8_t status;
+    currentDescriptorHeaderFloppyLba = 0;
 
     while (hddPos.lba < hddGeom.totalSectors)
     {
