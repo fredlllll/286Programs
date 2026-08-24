@@ -1,0 +1,22 @@
+{
+    "configurations": [
+        {
+            "name": "Watcom 286",
+            "includePath": [
+                "${workspaceFolder}/source"
+            ],
+            "defines": [
+                "__far=",
+                "__near=",
+                "__interrupt=",
+                "__cdecl=",
+                "__watcall="
+            ],
+            "compilerPath": "",
+            "cStandard": "c89",
+            "cppStandard": "c++98",
+            "intelliSenseMode": "windows-gcc-x86"
+        }
+    ],
+    "version": 4
+}
