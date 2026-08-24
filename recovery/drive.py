@@ -129,6 +129,8 @@ def read_drive(letter, expect_bytes=DISK_BYTES):
                             == crc16(bytes(block_new[0:510]))
                         if crc_ok_new:
                             img = bytes(buf)
+                            block = block_new
+                            count = block_new[0]
                             break
             ngood = sum(1 for i in range(count)
                         if has_data(block[1 + i * ENTRY_SIZE + 3]))
