@@ -6,7 +6,7 @@
    done = hdd sectors attempted on this disk. stays in tick units as
    long as possible; minutes extracted by subtraction (1092 ticks ~=
    60 s), seconds by native 16-bit division */
-static void printEta(uint32_t elapsedTicks, uint16_t done){
+void printEta(uint32_t elapsedTicks, uint16_t done){
   uint32_t totalT;
   uint32_t remainT;
   uint32_t m;
