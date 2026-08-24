@@ -118,15 +118,15 @@ def read_drive(letter, expect_bytes=DISK_BYTES):
             count = block[0]
             if count > DESC_PER_BLOCK:
                 break
-            crc_ok = struct.unpack_from('<H', block, 510)[0] \
-                == crc16(bytes(block[0:510]))
+            crc_ok = struct.unpack_from('<H', block, 506)[0] \
+                == crc16(bytes(block[0:506]))
             if not crc_ok:
                 for attempt in range(RETRY_SECTORS):
                     retries += 1
                     if _read_sector(k32, handle, pos, buf):
                         block_new = bytes(buf[pos:pos + SECTOR])
-                        crc_ok_new = struct.unpack_from('<H', block_new, 510)[0] \
-                            == crc16(bytes(block_new[0:510]))
+                        crc_ok_new = struct.unpack_from('<H', block_new, 506)[0] \
+                            == crc16(bytes(block_new[0:506]))
                         if crc_ok_new:
                             img = bytes(buf)
                             block = block_new
@@ -158,8 +158,8 @@ def _iter_blocks(image):
         count = block[0]
         if count > DESC_PER_BLOCK:
             break
-        crc_ok = struct.unpack_from('<H', block, 510)[0] \
-            == crc16(bytes(block[0:510]))
+        crc_ok = struct.unpack_from('<H', block, 506)[0] \
+            == crc16(bytes(block[0:506]))
         yield crc_ok
         ngood = sum(1 for i in range(count)
                     if has_data(block[1 + i * ENTRY_SIZE + 3]))

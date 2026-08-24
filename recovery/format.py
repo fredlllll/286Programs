@@ -4,7 +4,7 @@ Floppy layout (see watcomc/source/program.c):
   LBA 0..     repeating groups, one per hdd track batch:
                  [descriptor block: count byte + up to 101 entries of
                   lba(3 bytes le) + int13 status(1) + dataIdx(1),
-                  padded, crc16 over bytes 0..509]
+                   padded, crc16 over bytes 0..505]
                  [the 512-byte data sectors whose status says data follows]
 
 No third party dependencies, stdlib only.
@@ -85,8 +85,8 @@ def iter_groups(image):
         count = block[0]
         if count > DESC_PER_BLOCK:
             break                                   # corrupt, cannot trust
-        crc_ok = struct.unpack_from('<H', block, 510)[0] \
-            == crc16(bytes(block[0:510]))
+        crc_ok = struct.unpack_from('<H', block, 506)[0] \
+            == crc16(bytes(block[0:506]))
         entries = []
         for i in range(count):
             off = 1 + i * ENTRY_SIZE

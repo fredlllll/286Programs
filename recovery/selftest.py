@@ -37,7 +37,7 @@ def make_disk(seq, total, corrupt_group=None, corrupt_byte=None):
             if has_data(st):
                 block[off + 4] = len(datas)
                 datas.append(fake_sector(lba))
-        struct.pack_into('<H', block, 510, crc16(bytes(block[0:510])))
+        struct.pack_into('<H', block, 506, crc16(bytes(block[0:506])))
         if gi == corrupt_group:
             block[corrupt_byte] ^= 0xFF
         img[pos:pos + SECTOR] = block
