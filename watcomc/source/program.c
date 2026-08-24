@@ -58,8 +58,7 @@ void collectProgramInput(void)
     print(", retries ");
     printDecLong(hddRetries);
     print(", head mask ");
-    printHex(headMask >> 4);
-    printHex(headMask & 0x0F);
+    printHex(headMask);
     print(", total ");
     printDecLong(hddGeom.totalSectors);
     print(" sectors (");
@@ -122,8 +121,7 @@ struct Sector hddReadBuffer;
 
 static struct Sector __far *dataSlot(uint8_t idx)
 {
-    return (struct Sector __far *)MK_FP(ARENA_SEG,
-                                        (unsigned int)idx * sizeof(struct Sector));
+    return (struct Sector __far *)MK_FP(ARENA_SEG, (unsigned int)idx * sizeof(struct Sector));
 }
 
 #define DATAIDXNOTWRITTEN 255
