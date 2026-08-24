@@ -174,6 +174,7 @@ void writeOutBufferedData(void)
         seekFloppy(0, 0, 1);
     }
     currentDescriptorHeader.count = 0;
+    currentDataIdx = 0;
 }
 
 void addDescriptor(uint32_t lba, uint8_t status)
