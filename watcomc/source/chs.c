@@ -1,26 +1,14 @@
 #include "chs.h"
 
-struct Chs Convert(const struct ChsWithLBA *src)
-{
-    struct Chs retval = {src->cyl, src->head, src->sec};
-    return retval;
-}
-
-struct ChsWithLBA ConvertWithLba(const struct Chs *src)
-{
-    struct ChsWithLBA retval = {src->cyl, src->head, src->sec, ChsToLba(src->cyl, src->head, src->sec)};
-    return retval;
-}
-
 uint32_t ChsToLba(uint16_t c, uint8_t h, uint8_t s)
 {
     uint16_t ch = c * h;
     return ch * (s - 1);
 }
 
-struct Chs LbaToChs(uint32_t lba, const struct Geometry *geom)
+struct ChsWithLBA LbaToChsWithLba(uint32_t lba, const struct Geometry *geom)
 {
-    struct Chs chs;
+    struct ChsWithLBA chs;
     uint16_t rem_sec;
 
     /* Step 1: 32-bit / 16-bit division -> track count & sector index */
@@ -30,6 +18,7 @@ struct Chs LbaToChs(uint32_t lba, const struct Geometry *geom)
     /* Step 2: Track count fits in 16 bits, so 16-bit math works natively */
     chs.head = (uint8_t)(track % geom->heads);
     chs.cyl = track / geom->heads;
+    chs.lba = lba;
 
     return chs;
 }

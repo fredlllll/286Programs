@@ -37,24 +37,13 @@ struct Geometry {
 /* advances a chs position by one sector, wrapping like the bios
    expects: sector overflows into head, head into cylinder. works
    for any drive, which is why both disk modules share it */
-void stepChs(struct Chs* pos, const struct Geometry* geom);
 void stepChs(struct ChsWithLBA* pos, const struct Geometry* geom);
 
-/* filled in by queryBiosDrive(), read by main() after the call.
-   volatile because the bios changes them behind the compiler's back */
-extern volatile unsigned char biosCylLo;    /* ch: cylinder low bits */
-extern volatile unsigned char biosCylHiSec; /* cl: cyl high bits + spt */
-extern volatile unsigned char biosHeadMax;  /* dh: max head index */
 
 /* resets the disk controller. called between retries to clear error
    states. note: on an hdd this makes the drive recalibrate (loud
    seek to cylinder 0 and back), so it is used sparingly there */
 void resetDiskSystem(void);
-
-/* asks the bios what it thinks drive 0x80 looks like. results are
-   maximum indices except for sectors per track. some ancient bioses
-   scribble a parameter table into es:di, hence the dummy buffer */
-void queryBiosDrive(void);
 
 /* reads numSectorsToRead consecutive sectors starting at the given
    chs position into destination. returns 0 on success, otherwise the

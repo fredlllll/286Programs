@@ -19,8 +19,7 @@ void advanceHddPosition(void)
 
 void seekHdd(uint32_t target)
 {
-  struct Chs newPos = LbaToChs(target, &hddGeom);
-  hddPos = ConvertWithLba(&newPos);
+  hddPos = LbaToChsWithLba(target, &hddGeom);
 }
 
 uint8_t isStatusSuccess(uint8_t status)
@@ -74,7 +73,7 @@ uint8_t readHddResilient(uint8_t *dest)
   printChar('/', 1);
   printDecLong(hddPos.sec);
   print(" LBA: ");
-  printDecLong(hddLBA);
+  printDecLong(hddPos.lba);
   print(" Status: ");
   printInt13Status(status);
   print("\r\n");

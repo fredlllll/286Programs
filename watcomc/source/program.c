@@ -55,14 +55,27 @@ void collectProgramInput(void)
     /* resuming: the lba where the previous run stopped becomes the
      starting point; its disk number is derived from how many full
      disks worth of sectors fit before it */
-    prgState.startLba = decInput("Resume at hdd LBA", 0);
-    // startslba is used to calculate ETA
-    prgState.currentLba = prgState.startLba;
+    uint32_t startLba = decInput("Resume at hdd LBA", 0);
+    ensureStartLbaLimit(startLba);
+    seekHdd(startLba);
+    // TODO: startslba is used to calculate ETA
 }
 
-void ensureStartLbaLimit(void)
+/* one status line per flushed group: disk label, absolute hdd
+   position, descriptor/data counts, floppy failures and a rolling
+   time estimate */
+static void progressLine(void)
 {
-    if (prgState.startLba >= hddGeom.totalSectors)
+    unsigned long now;
+    print("LBA:");
+    printDecLong(hddPos.lba);
+    print("/");
+    printDecLong(hddGeom.totalSectors);
+}
+
+void ensureStartLbaLimit(uint32_t startLba)
+{
+    if (startLba >= hddGeom.totalSectors)
     {
         print("Start LBA beyond end of drive.\r\nProgram halted.\r\n");
         halt();
@@ -139,14 +152,24 @@ void writeOutBufferedData(void)
         seekFloppy(0, 0, 1);
     }
 
-    writeFloppyAuto(&currentDescriptorHeader);
-    for (uint8_t i = 0; i < currentDescriptorHeader.count; ++i)
+    while (1)
     {
-        uint8_t dataIdx = currentDescriptorHeader.desc[i].dataIdx;
-        if (dataIdx != DATAIDXNOTWRITTEN)
+        uint8_t err = 0;
+        err += writeVerified(&currentDescriptorHeader);
+        for (uint8_t i = 0; i < currentDescriptorHeader.count; ++i)
         {
-            writeFloppyAuto(&descriptorDataBuffer[dataIdx]);
+            uint8_t dataIdx = currentDescriptorHeader.desc[i].dataIdx;
+            if (dataIdx != DATAIDXNOTWRITTEN)
+            {
+                err += writeVerified(&descriptorDataBuffer[dataIdx]);
+            }
         }
+        if (!err)
+        {
+            break;
+        }
+        waitForEnter("Floppy write impossible, give new one and press enter\r\n");
+        seekFloppy(0, 0, 1);
     }
     currentDescriptorHeader.count = 0;
 }
@@ -199,8 +222,10 @@ void processFloppy(void)
         }
         addDescriptor(hddPos.lba, status);
         advanceHddPosition();
+        progressLine();
     }
-    if(currentDescriptorHeader.count > 0){
+    if (currentDescriptorHeader.count > 0)
+    {
         writeOutBufferedData();
     }
 }
@@ -218,11 +243,9 @@ void checkProgramEnd(void)
 
 void program(void)
 {
-    initProgramState();
     printProgramStart();
     collectProgramInput();
     print("\r\nStarting. Everything else runs by itself.\r\n");
-    ensureStartLbaLimit();
 
     while (1)
     {

@@ -1,4 +1,5 @@
 #include "print.h"
+#include "intdef.h"
 
 /* lookup table for hex nibbles: index 0..15 -> character '0'..'F'.
    a nibble is half a byte, i.e. one hex digit */
@@ -13,19 +14,19 @@ void print(const char* text){
 
 /* value >> 4 throws away the low nibble leaving the high one,
    value & 0x0F masks away everything but the low nibble */
-void printHex(unsigned char value){
+void printHex(uint8_t value){
   char ch = hexAlphabet[value >> 4];
   printChar(ch, 1);
   ch = hexAlphabet[value & 0x0F];
   printChar(ch, 1);
 }
 
-void printHexShort(unsigned short value){
+void printHexShort(uint16_t value){
   printHex(value >> 8);         /* high byte first */
   printHex(value & 0xFF);       /* then low byte   */
 }
 
-void printHexLong(unsigned long value){
+void printHexLong(uint32_t value){
   printHexShort(value >> 16);
   printHexShort(value & 0xFFFF);
 }

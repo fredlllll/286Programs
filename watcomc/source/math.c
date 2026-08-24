@@ -105,21 +105,3 @@ uint32_t mul32_16(uint32_t multiplicand, uint16_t multiplier) {
     /* Combine the two 16-bit halves back into a 32-bit return value */
     return ((uint32_t)result_high << 16) | result_low;
 }
-
-/* repeated subtraction division. deliberately dumb and slow: it only
-   runs twice at startup (resume lba -> suggested floppy number).
-   APPROX_DISK_CAPACITY is a compile time constant so the loop needs
-   no division either. the result is only ever a label suggestion -
-   the v3 format makes real per-disk capacity depend on how many
-   sectors get skipped, so exact prediction is neither possible nor
-   needed */
-uint32_t divByDiskCapacity(uint32_t v, uint32_t* remainder){
-  uint32_t n;
-  n = 0;
-  while(v >= APPROX_DISK_CAPACITY){
-    v -= APPROX_DISK_CAPACITY;
-    n++;
-  }
-  *remainder = v;
-  return n;
-}

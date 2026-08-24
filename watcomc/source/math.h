@@ -11,11 +11,6 @@ uint32_t mulLong(uint32_t a, uint16_t b);
    same runtime-helper reason as mulLong */
 uint32_t divLong(uint32_t num, uint16_t den);
 
-/* divides v by the payload capacity of one floppy, returns quotient,
-   remainder via pointer. used to translate "hdd lba" into "which
-   floppy disk number" */
-uint32_t divByDiskCapacity(uint32_t v, uint32_t *remainder);
-
 uint16_t div32_16(uint32_t dividend, uint16_t divisor, uint16_t *rem);
 
 /*

@@ -7,9 +7,7 @@
 struct ProgramState
 {
     unsigned long startLba;
-    unsigned long currentLba;
 } prgState;
 
-void initProgramState(void);
 
 #endif

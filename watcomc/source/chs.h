@@ -24,12 +24,8 @@ struct ChsWithLBA
     uint32_t lba;
 };
 
-struct Chs Convert(const struct ChsWithLBA* src);
-
-struct ChsWithLBA ConvertWithLba(const struct Chs* src);
-
 uint32_t ChsToLba(uint16_t c, uint8_t h, uint8_t s);
 
-struct Chs LbaToChs(uint32_t lba, const struct Geometry *geom);
+struct ChsWithLBA LbaToChsWithLba(uint32_t lba, const struct Geometry *geom);
 
 #endif

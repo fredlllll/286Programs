@@ -13,6 +13,7 @@
 
 #ifndef DEFINITIONS_H
 #define DEFINITIONS_H
+#include "intdef.h"
 
 /* ---- hard disk geometry ----
    factory geometry of the target mfm/rll drive. the startup prompts
@@ -22,7 +23,7 @@
 #define HDD_CYLS 820
 #define HDD_HEADS 6
 #define HDD_SPT 26              /* sectors per track */
-#define HDD_TOTAL_SECTORS ((unsigned long)HDD_CYLS*HDD_HEADS*HDD_SPT)
+#define HDD_TOTAL_SECTORS ((uint32_t)HDD_CYLS*HDD_HEADS*HDD_SPT)
 
 /* ---- 1.44mb floppy geometry ----
    fixed for a standard 3.5" hd floppy: 80 cylinders x 2 heads x 18
@@ -32,25 +33,13 @@
 #define FLOPPY_SPT 18
 #define FLOPPY_TOTAL_SECTORS (FLOPPY_CYLS*FLOPPY_HEADS*FLOPPY_SPT)
 
-/* each floppy starts with 10 reserved sectors (the header sector
-   plus padding), the remaining capacity carries groups of descriptor
-   blocks + their data sectors */
-#define HEADER_LBAS 10
-
-/* how many hdd sectors one floppy can roughly hold in the v3 format:
-   payload slots shrunk by the descriptor-block overhead (one block
-   sector per BATCH_SECTORS data sectors). this is only good enough
-   for the disk-number suggestion at startup and the time estimate;
-   the real capacity depends on how many sectors get skipped, because
-   unreadable sectors cost a descriptor (5 bytes) but no data slot */
-#define APPROX_DISK_CAPACITY \
-  ((unsigned long)(FLOPPY_TOTAL_SECTORS-HEADER_LBAS)*BATCH_SECTORS/(BATCH_SECTORS+1))
-
 /* ---- retry and error handling policy ---- */
 
 #define RETRY_HDD 16            /* read attempts per hdd sector */
 #define RETRY_FLOPPY 4          /* write attempts per round */
 #define REWRITE_ROUNDS 5        /* floppy: up to RETRY_FLOPPY*REWRITE_ROUNDS attempts per sector */
-#define MAX_BAD_ALL 64          /* session-wide bad lba log for the summary */
+
+#define APPROX_DISK_CAPACITY \
+  ((unsigned long)(FLOPPY_TOTAL_SECTORS-28))
 
 #endif
