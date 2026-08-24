@@ -123,7 +123,7 @@ def process_bootloader():
         main = f.read()
 
     # sectors needed by main.bin (rounded up), starting at sector 2
-    main_sectors = len(main) // 512 +1
+    main_sectors = (len(main) + 511) // 512
     print(f"\r\nmain uses {main_sectors} sectors\r\n")
 
     bootloader_code = bootloader_code.replace("%%num_sectors%%", str(main_sectors))
