@@ -78,58 +78,21 @@ struct FloppyHeader {
 };
 #pragma pack( pop )
 
-/* ---- one sector descriptor: the ID card of a single hdd sector ----
 
-   5 bytes each. lba is 24 bits (8 gb ceiling at 512 b/sector, far
-   past anything an mfm/rll controller can address). status is the
-   int13 code from the read attempt (or HEADSKIPPED). dataIdx says
-   which slot of the following data list holds this sector's 512
-   bytes; only meaningful when SECTOR_HAS_DATA(status) */
-
-#pragma pack( push, 1 )
-struct SectorDesc {
-  unsigned char lba[3];        /* hdd lba, little endian                  */
-  unsigned char status;        /* int13 code, see SECTOR_STATUS_*         */
-  unsigned char dataIdx;       /* index into the group's data list        */
-};
-#pragma pack( pop )
-
-/* ---- one descriptor block: describes one whole track batch ----
-
-   physically written BEFORE the data it talks about, so the restorer
-   can stream through the disk in one pass. count tells how many of
-   the DESC_PER_BLOCK slots are real; unused tail slots are zeroed.
-   the crc covers the entire first 510 bytes including those zeros,
-   so a damaged block is detected as a unit */
-
-#pragma pack( push, 1 )
-struct DescBlock {
-  unsigned char count;                          /* entries used           */
-  struct SectorDesc desc[DESC_PER_BLOCK];       /* the descriptors        */
-  unsigned char reserved[512-1-5*DESC_PER_BLOCK-2]; /* zeros              */
-  unsigned short crc;                           /* crc over bytes 0..509  */
-};
-#pragma pack( pop )
-
-/* compile-time guards: negative array sizes = build errors if any
-   packed struct drifts from its documented size */
-typedef char headersizecheck[(sizeof(struct FloppyHeader) == 512) ? 1 : -1];
-typedef char descblocksizecheck[(sizeof(struct DescBlock) == 512) ? 1 : -1];
-typedef char descsizcheck[(sizeof(struct SectorDesc) == 5) ? 1 : -1];
+void seekFloppy(unsigned int c, unsigned char h, unsigned char s);
 
 /* current write position on the floppy. main() resets it per disk
    and rewinds it to lba 0 when writing the header sector.
    flpLBA counts floppy payload sectors consumed, used for capacity
    tracking and progress display */
-extern struct Chs flpPos;
-extern unsigned long flpLBA;
+extern struct ChsWithLBA floppyPosition;
 
 /* floppy write surrenders on the current disk (retries exhausted).
    expected to stay zero; counted so the disk header can prove it */
 extern unsigned int flpFailCount;
 
 /* advances the floppy write position by one sector */
-void advanceCHSFloppy(void);
+void advanceFloppyPosition(void);
 
 /* writes one 512 byte sector at the current position with retries,
    then verifies by reading it back and comparing byte for byte.

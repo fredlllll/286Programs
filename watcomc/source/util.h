@@ -28,4 +28,6 @@ unsigned char memcmpBuf(unsigned char* a, unsigned char* b);
    returns it as one 32 bit number */
 unsigned long biosTicks(void);
 
+void halt(void);
+
 #endif

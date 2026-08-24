@@ -106,3 +106,9 @@ unsigned long biosTicks(void){
   };
   return ((unsigned long)hi << 16) | lo;
 }
+
+void halt(void){
+  while(1){
+    _asm{ hlt }; 
+  }
+}

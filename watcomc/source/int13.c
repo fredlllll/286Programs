@@ -16,34 +16,23 @@ void stepChs(struct Chs* pos, const struct Geometry* geom){
   }
 }
 
+void stepChs(struct ChsWithLBA* pos, const struct Geometry* geom){
+  pos->sec += 1;
+  if(pos->sec > geom->spt){       /* past last sector -> next head */
+    pos->sec = 1;                 /* sectors are numbered from 1! */
+    pos->head += 1;
+  }
+  if(pos->head >= geom->heads){   /* past last head -> next cylinder */
+    pos->head = 0;
+    pos->cyl += 1;
+  }
+  pos->lba+=1;
+}
+
 void resetDiskSystem(void){
   _asm{
     xor ax,ax          ; ah = 0 = "reset disk system", dl already
     int 0x13           ; holds the last used drive number
-  };
-}
-
-/* scratch buffer for queryBiosDrive: the bios may copy its internal
-   drive parameter table to es:di, and if that pointed at random
-   memory it could corrupt something. 16 bytes is plenty */
-static unsigned char prmTable[16];
-volatile unsigned char biosCylLo;
-volatile unsigned char biosCylHiSec;
-volatile unsigned char biosHeadMax;
-
-void queryBiosDrive(void){
-  /* offset of the dummy buffer within our flat segment */
-  unsigned short diOff = (unsigned short)(unsigned int)prmTable;
-  _asm{
-    mov ah, 0x08       ; "read drive parameters"
-    mov dl, 0x80       ; first hard disk
-    mov di, diOff      ; es:di = writable scratch space
-    push ds
-    pop es             ; es = ds = 0 (we keep segments flat)
-    int 0x13
-    mov biosCylLo, ch  ; results are max indices, except cl which
-    mov biosCylHiSec, cl ; packs sectors per track in bits 0..5
-    mov biosHeadMax, dh
   };
 }
 

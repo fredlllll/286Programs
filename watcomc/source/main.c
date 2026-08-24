@@ -54,6 +54,7 @@
 #include "util.h"
 #include "hdd.h"
 #include "floppy.h"
+#include "program.h"
 
 /* ------------------------- buffers and batch state */
 
@@ -126,7 +127,7 @@ static unsigned char writeVerified(unsigned char* src){
   if(writeFloppyAuto(src) != 0){
     return 1;
   }
-  advanceCHSFloppy();
+  advanceFloppyPosition();
   flpLBA++;
   return 0;
 }
@@ -137,7 +138,7 @@ static unsigned char writeVerified(unsigned char* src){
    BATCH_SECTORS slots may sit unused as a result, that is the price
    for never splitting a batch across disks */
 static unsigned char floppyFitsGroup(void){
-  return (FLPD_TOTAL_SECTORS - flpLBA) >= (BATCH_SECTORS + 1);
+  return (FLOPPY_TOTAL_SECTORS - flpLBA) >= (BATCH_SECTORS + 1);
 }
 
 /* turns the buffered track into one descriptor group: block first,
@@ -305,7 +306,7 @@ static unsigned char doOneDisk(void){
     if(SECTOR_HAS_DATA(st)){
       batchGood++;
     }
-    advanceCHSHdd();
+    advanceHddPosition();
     hddLBA++;
     batchFill++;
     if(batchFill == BATCH_SECTORS){
@@ -347,6 +348,7 @@ void _cstart(void){
   /*shut up linker who cant find _cstart_ that it doesnt need*/
 }
 
+
 /* main() runs the interactive part once (bios query, geometry
    prompts), then loops over floppies forever until the drive is
    fully dumped or the user presses esc. it never returns; finished
@@ -354,108 +356,27 @@ void _cstart(void){
 #pragma code_seg ( "start_segment" )
 void main(void){
   unsigned long startLBA;
-  unsigned long rem;
   unsigned long v;
   unsigned int i;
   unsigned int biosCyls;
 
   crcInit();
 
-  print("\r\n\r\nHDD saver 3.0\r\n");
-  print("Dumps ");
-  printDecLong(hddGeom.totalSectors);
-  print(" hdd sectors (");
-  printDecLong(hddGeom.totalSectors >> 11);  /* >>11 = /2048 sectors = MB */
-  print(" MB) to floppies, up to ");
-  printDecLong(APPROX_DISK_CAPACITY);
-  print(" hdd sectors per disk.\r\n");
-  print("Every sector is stored with its lba+status, so unreadable\r\n");
-  print("sectors are just logged (with the drive's error code) and\r\n");
-  print("cost no floppy space. Disk order does not matter.\r\n");
-  print("Floppy writes are verified and retried automatically.\r\n");
-  print("ESC stops cleanly after the current transfer.\r\n\r\n");
+  program();
 
-  /* ask the bios what drive 0x80 looks like and show it, purely
-     informational: the defaults usually match but a translated
-     bios will report different numbers than the drive really has */
-  queryBiosDrive();
-  biosCyls = ((biosCylHiSec & 0xC0) << 2) | biosCylLo;  /* unpack cyl */
-  if(biosCyls || biosHeadMax){
-    print("BIOS drive 0x80: ");
-    printDecLong(biosCyls + 1);          /* bios reports max indices */
-    print(" cyl, ");
-    printDecLong(biosHeadMax + 1);
-    print(" heads, ");
-    printDecLong(biosCylHiSec & 0x3F);   /* cl bits 0..5 = spt */
-    print(" spt\r\n");
-  }else{
-    print("BIOS geometry query failed, using defaults.\r\n");
-  }
-  print("Geometry must match how the data was written!\r\n");
+  
 
-  /* every prompt shows the compiled-in default in brackets; typing
-     nothing (just enter) accepts it */
-  v = decInput("Cylinders", hddGeom.cyls);
-  if(v && v <= 1024){
-    hddGeom.cyls = (unsigned int)v;
-  }
-  v = decInput("Heads", hddGeom.heads);
-  if(v && v <= 255){
-    hddGeom.heads = (unsigned char)v;
-  }
-  v = decInput("Sectors per track", hddGeom.spt);
-  if(v && v <= 63){
-    hddGeom.spt = (unsigned char)v;
-  }
-  v = decInput("Hdd read retries", hddRetries);
-  if(v <= 255){
-    hddRetries = (unsigned char)v;
-  }
-  print("Head select: decimal bitmask, bit N = head N.\r\n");
-  v = decInput("Head bitmask", 0xFF);
-  if(v){
-    headMask = (unsigned char)v;
-  }
-  hddGeom.totalSectors = mulLong(mulLong(hddGeom.cyls, hddGeom.heads), hddGeom.spt);
-  print("Using: ");
-  printDecLong(hddGeom.cyls);
-  print("/");
-  printDecLong(hddGeom.heads);
-  print("/");
-  printDecLong(hddGeom.spt);
-  print(", retries ");
-  printDecLong(hddRetries);
-  print(", head mask ");
-  printHex(headMask >> 4);
-  printHex(headMask & 0x0F);
-  print(", total ");
-  printDecLong(hddGeom.totalSectors);
-  print(" sectors (");
-  printDecLong(hddGeom.totalSectors >> 11);
-  print(" MB).\r\n");
+  
+  
 
-  /* resuming: the lba where the previous run stopped becomes the
-     starting point; its disk number is derived from how many full
-     disks worth of sectors fit before it */
-  startLBA = decInput("Resume at hdd LBA", 0);
-  diskStartLBA = startLBA;
-  rem = 0;
-  diskIndex = divByDiskCapacity(startLBA, &rem);
-  diskIndex = decInput("Floppy disk number", diskIndex);
-  print("\r\nStarting. Everything else runs by itself.\r\n");
+  
 
-  if(startLBA >= hddGeom.totalSectors){
-    print("Start LBA beyond end of drive.\r\nPower off.\r\n");
-    while(1){
-      _asm{ hlt };             /* hlt stops the cpu until interrupt */
-    }
-  }
-
-  seekToLBA(startLBA);
-  allBadCount = 0;
+  //seekToLBA(startLBA);
   escFlag = 0;
 
   while(1){
+
+
     /* remember where we are on the hdd: if this floppy fails late,
        resetForDiskStart() can rewind to exactly this spot and the
        whole content gets re-dumped onto fresh media. one assignment

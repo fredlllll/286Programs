@@ -27,10 +27,10 @@
 /* ---- 1.44mb floppy geometry ----
    fixed for a standard 3.5" hd floppy: 80 cylinders x 2 heads x 18
    sectors of 512 bytes = 2880 sectors total */
-#define FLPD_CYLS 80
-#define FLPD_HEADS 2
-#define FLPD_SPT 18
-#define FLPD_TOTAL_SECTORS (FLPD_CYLS*FLPD_HEADS*FLPD_SPT)
+#define FLOPPY_CYLS 80
+#define FLOPPY_HEADS 2
+#define FLOPPY_SPT 18
+#define FLOPPY_TOTAL_SECTORS (FLOPPY_CYLS*FLOPPY_HEADS*FLOPPY_SPT)
 
 /* each floppy starts with 10 reserved sectors (the header sector
    plus padding), the remaining capacity carries groups of descriptor
@@ -44,14 +44,10 @@
    the real capacity depends on how many sectors get skipped, because
    unreadable sectors cost a descriptor (5 bytes) but no data slot */
 #define APPROX_DISK_CAPACITY \
-  ((unsigned long)(FLPD_TOTAL_SECTORS-HEADER_LBAS)*BATCH_SECTORS/(BATCH_SECTORS+1))
+  ((unsigned long)(FLOPPY_TOTAL_SECTORS-HEADER_LBAS)*BATCH_SECTORS/(BATCH_SECTORS+1))
 
 /* ---- retry and error handling policy ---- */
-#define BATCH_SECTORS 26        /* one full hdd track per ram buffer; also
-                                   the number of descriptors per descriptor
-                                   block, see DESC_PER_BLOCK */
-#define DESC_PER_BLOCK BATCH_SECTORS  /* descriptors carried by one descriptor
-                                         block sector = one batch/track */
+
 #define RETRY_HDD 16            /* read attempts per hdd sector */
 #define RETRY_FLOPPY 4          /* write attempts per round */
 #define REWRITE_ROUNDS 5        /* floppy: up to RETRY_FLOPPY*REWRITE_ROUNDS attempts per sector */

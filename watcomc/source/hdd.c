@@ -7,33 +7,25 @@
    differently (e.g. after the cmos battery died) and reads only line
    up when we use exactly the geometry the data was originally written
    with */
-struct Geometry hddGeom = { HDD_CYLS, HDD_HEADS, HDD_SPT, HDD_TOTAL_SECTORS };
+const struct Geometry hddGeom = {HDD_CYLS, HDD_HEADS, HDD_SPT, HDD_TOTAL_SECTORS};
+struct ChsWithLBA hddPos = {0, 0, 1, 0};
 unsigned char hddRetries = RETRY_HDD;
 unsigned char headMask = 0xFF;
 
-struct Chs hddPos = {0, 0, 1};
-unsigned long hddLBA;
-
-/* lbas of sectors that could not be read, whole session, printed in
-   the end-of-run summary. the per-disk record of the same information
-   is the sector descriptor stream on the floppies themselves */
-unsigned long badLbasAll[MAX_BAD_ALL];
-unsigned int allBadCount;
-
-void advanceCHSHdd(void){
+void advanceHddPosition(void)
+{
   stepChs(&hddPos, &hddGeom);
 }
 
-/* position hdd chs at lba without any 32 bit division:
-   just step forward from 0/0/1, cheap enough for these drive sizes */
-void seekToLBA(unsigned long target){
-  hddPos.cyl = 0;
-  hddPos.head = 0;
-  hddPos.sec = 1;
-  while(target){
-    advanceCHSHdd();
-    target--;
-  }
+void seekHdd(uint32_t target)
+{
+  struct Chs newPos = LbaToChs(target, &hddGeom);
+  hddPos = ConvertWithLba(&newPos);
+}
+
+uint8_t isStatusSuccess(uint8_t status)
+{
+  return status == 0 || status == 0x11;
 }
 
 /* reads one hdd sector. retries up to hddRetries times (configurable,
@@ -47,45 +39,45 @@ void seekToLBA(unsigned long target){
    given up after every attempt. a dead sector does NOT get dumped:
    its lba and the error code land in the next descriptor block and
    the dump carries on - one bad sector costs 5 bytes, not 512 */
-unsigned char readHddResilient(unsigned char* dest){
-  unsigned char tries;
-  unsigned char status;
+uint8_t readHddResilient(uint8_t *dest)
+{
+  uint8_t tries;
+  uint8_t status;
 
-  status = readFromDrive(1, hddPos.cyl, hddPos.head, hddPos.sec, 0x80, dest);
   tries = 0;
-  while(status != 0 && status != 0x11 && tries < hddRetries){
-    if(hddRetries >= 2 && tries == hddRetries / 2){
-      resetDiskSystem();     /* halfway through, try with a reset */
+  do
+  {
+    if (hddRetries > 1 && tries == hddRetries / 2)
+    {
+      resetDiskSystem(); /* halfway through, try with a reset */
     }
     status = readFromDrive(1, hddPos.cyl, hddPos.head, hddPos.sec, 0x80, dest);
     tries++;
-  }
-  if(status != 0 && status != 0x11 && hddRetries > 0){
-    resetDiskSystem();       /* clean up controller state for next sector */
-  }
-  if(status == 0 || status == 0x11){
+  } while (!isStatusSuccess(status) && tries < hddRetries);
+
+  if (isStatusSuccess(status))
+  {
     /* 0x11 = recoverable ECC error, bios already corrected the data.
        the distinction is preserved: the restorer may want to know
        which sectors only survived via ecc correction */
     return status;
   }
+  else
+  {
+    resetDiskSystem(); /* clean up controller state for next sector */
+  }
 
-  print("\r\nHDD read fail CHS ");
+  print("HDD read fail CHS ");
   printDecLong(hddPos.cyl);
   printChar('/', 1);
   printDecLong(hddPos.head);
   printChar('/', 1);
   printDecLong(hddPos.sec);
-  print(" LBA ");
+  print(" LBA: ");
   printDecLong(hddLBA);
-  print(": ");
+  print(" Status: ");
   printInt13Status(status);
-  print(", logging in descriptor\r\n");
+  print("\r\n");
 
-  /* session-wide log for the end-of-run summary. the per-disk
-     record is the sector descriptor itself now */
-  if(allBadCount < MAX_BAD_ALL){
-    badLbasAll[allBadCount++] = hddLBA;
-  }
   return status;
 }

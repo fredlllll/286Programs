@@ -1,0 +1,232 @@
+#include "hdd.h"
+#include "floppy.h"
+#include "programState.h"
+#include "util.h"
+#include "keyboard.h"
+
+void printProgramStart(void)
+{
+    print("\r\n\r\nHDD saver 3.0\r\n");
+    print("Dumps ");
+    printDecLong(hddGeom.totalSectors);
+    print(" hdd sectors (");
+    printDecLong(hddGeom.totalSectors >> 11); /* >>11 = /2048 sectors = MB */
+    print(" MB) to floppies");
+    print("Every sector is stored with its lba+status, so unreadable\r\n");
+    print("sectors are just logged (with the drive's error code) and\r\n");
+    print("cost no floppy space. Disk order does not matter.\r\n");
+    print("Floppy writes are verified and retried automatically.\r\n");
+    print("ESC stops cleanly after the current transfer.\r\n\r\n");
+}
+
+void collectProgramInput(void)
+{
+    /* every prompt shows the compiled-in default in brackets; typing
+     nothing (just enter) accepts it */
+    unsigned long v;
+    v = decInput("Hdd read retries", hddRetries);
+    if (v <= 255)
+    {
+        hddRetries = (unsigned char)v;
+    }
+    print("Head select: decimal bitmask, bit N = head N.\r\n");
+    v = decInput("Head bitmask", 0xFF);
+    if (v)
+    {
+        headMask = (unsigned char)v;
+    }
+    print("Using: ");
+    printDecLong(hddGeom.cyls);
+    print("/");
+    printDecLong(hddGeom.heads);
+    print("/");
+    printDecLong(hddGeom.spt);
+    print(", retries ");
+    printDecLong(hddRetries);
+    print(", head mask ");
+    printHex(headMask >> 4);
+    printHex(headMask & 0x0F);
+    print(", total ");
+    printDecLong(hddGeom.totalSectors);
+    print(" sectors (");
+    printDecLong(hddGeom.totalSectors >> 11);
+    print(" MB).\r\n");
+
+    /* resuming: the lba where the previous run stopped becomes the
+     starting point; its disk number is derived from how many full
+     disks worth of sectors fit before it */
+    prgState.startLba = decInput("Resume at hdd LBA", 0);
+    // startslba is used to calculate ETA
+    prgState.currentLba = prgState.startLba;
+}
+
+void ensureStartLbaLimit(void)
+{
+    if (prgState.startLba >= hddGeom.totalSectors)
+    {
+        print("Start LBA beyond end of drive.\r\nProgram halted.\r\n");
+        halt();
+    }
+}
+
+struct Sector hddReadBuffer;
+
+#define DATAIDXNOTWRITTEN 255
+/* ---- one sector descriptor: the ID card of a single hdd sector ----
+
+   5 bytes each. lba is 24 bits (8 gb ceiling at 512 b/sector, far
+   past anything an mfm/rll controller can address). status is the
+   int13 code from the read attempt (or HEADSKIPPED). dataIdx says
+   which slot of the following data list holds this sector's 512
+   bytes; only meaningful when SECTOR_HAS_DATA(status) */
+
+#pragma pack(push, 1)
+struct SectorDesc
+{
+    uint8_t lba[3];  /* hdd lba, little endian                  */
+    uint8_t status;  /* int13 code, see SECTOR_STATUS_*         */
+    uint8_t dataIdx; /* index into the group's data list        */
+};
+#pragma pack(pop)
+
+/* ---- one descriptor block: describes one whole track batch ----
+
+   physically written BEFORE the data it talks about, so the restorer
+   can stream through the disk in one pass. count tells how many of
+   the DESC_PER_BLOCK slots are real; unused tail slots are zeroed.
+   the crc covers the entire first 510 bytes including those zeros,
+   so a damaged block is detected as a unit */
+
+#define DESC_PER_BLOCK (509 / sizeof(struct SectorDesc))
+
+uint16_t currentDescriptorHeaderFloppyLba = 0;
+
+#pragma pack(push, 1)
+struct DescBlock
+{
+    uint8_t count;                                                         /* entries used           */
+    struct SectorDesc desc[DESC_PER_BLOCK];                                /* the descriptors        */
+    uint16_t crc;                                                          /* crc over desc  */
+    uint8_t pad[512 - 1 - 2 - sizeof(struct SectorDesc) * DESC_PER_BLOCK]; /* zeros              */
+} currentDescriptorHeader;
+#pragma pack(pop)
+
+uint8_t currentDataIdx = 0;
+
+struct Sector
+{
+    uint8_t data[512];
+};
+
+struct Sector descriptorDataBuffer[DESC_PER_BLOCK];
+
+void writeOutBufferedData(void)
+{
+    // write out and reset
+    // TODO: crc
+    uint8_t neededSectors = 1;
+    for (uint8_t i = 0; i < currentDescriptorHeader.count; i++)
+    {
+        if (currentDescriptorHeader.desc[i].dataIdx != DATAIDXNOTWRITTEN)
+        {
+            neededSectors++;
+        }
+    }
+
+    if (FLOPPY_TOTAL_SECTORS - floppyPosition.lba < neededSectors)
+    {
+        waitForEnter("Floppy is full, put a new one in and press enter\r\n");
+        seekFloppy(0, 0, 1);
+    }
+
+    writeFloppyAuto(&currentDescriptorHeader);
+    for (uint8_t i = 0; i < currentDescriptorHeader.count; ++i)
+    {
+        uint8_t dataIdx = currentDescriptorHeader.desc[i].dataIdx;
+        if (dataIdx != DATAIDXNOTWRITTEN)
+        {
+            writeFloppyAuto(&descriptorDataBuffer[dataIdx]);
+        }
+    }
+    currentDescriptorHeader.count = 0;
+}
+
+void addDescriptor(uint32_t lba, uint8_t status)
+{
+    struct SectorDesc newDesc;
+    newDesc.status = status;
+    poke24(newDesc.lba, lba);
+    if (isStatusSuccess(status))
+    {
+        // write descriptor and data
+        newDesc.dataIdx = currentDataIdx++;
+        descriptorDataBuffer[newDesc.dataIdx] = hddReadBuffer;
+    }
+    else
+    {
+        newDesc.dataIdx = DATAIDXNOTWRITTEN;
+    }
+    currentDescriptorHeader.desc[currentDescriptorHeader.count] = newDesc;
+    currentDescriptorHeader.count++;
+
+    if (currentDescriptorHeader.count >= DESC_PER_BLOCK)
+    {
+        writeOutBufferedData();
+    }
+}
+
+void processFloppy(void)
+{
+    currentDescriptorHeaderFloppyLba = 0;
+    uint32_t diskStartTicks = biosTicks();
+    uint8_t status;
+
+    while (hddPos.lba < hddGeom.totalSectors)
+    {
+        if (headMask & (1 << hddPos.head))
+        {
+            /* read straight into the next FREE data slot: failed sectors
+               do not consume one, so good data stays packed and the
+               descriptor indices come out in encounter order */
+            status = readHddResilient(hddReadBuffer.data);
+        }
+        else
+        {
+            /* head deselected via bitmask: record it as such, dump
+               nothing. a later pass with that head enabled can fill the
+               hole - the restorer simply leaves this lba uncovered */
+            status = SECTOR_STATUS_HEADSKIPPED;
+        }
+        addDescriptor(hddPos.lba, status);
+        advanceHddPosition();
+    }
+    if(currentDescriptorHeader.count > 0){
+        writeOutBufferedData();
+    }
+}
+
+void checkProgramEnd(void)
+{
+    if (hddPos.lba >= hddGeom.totalSectors)
+    {
+        /* every sector of the drive has been through the pipeline */
+        print("\r\n=== DUMP COMPLETE ===\r\n");
+        print("Safe to power off.\r\n");
+        halt();
+    }
+}
+
+void program(void)
+{
+    initProgramState();
+    printProgramStart();
+    collectProgramInput();
+    print("\r\nStarting. Everything else runs by itself.\r\n");
+    ensureStartLbaLimit();
+
+    while (1)
+    {
+        processFloppy();
+        checkProgramEnd();
+    }
+}

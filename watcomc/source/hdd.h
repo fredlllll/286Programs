@@ -21,8 +21,7 @@ extern unsigned char headMask;
 /* current read position on the hdd. main() saves/restores it around
    each disk so an aborted disk can be retried at the same spot.
    hddLBA is kept alongside because it is what goes into the header */
-extern struct Chs hddPos;
-extern unsigned long hddLBA;
+extern struct ChsWithLBA hddPos = {0, 0, 1, 0};
 
 /* lbas of sectors that could not be read, whole session, for the
    end-of-run summary printed by main(). the durable per-sector record
@@ -31,13 +30,13 @@ extern unsigned long badLbasAll[MAX_BAD_ALL];
 extern unsigned int allBadCount;
 
 /* advances the hdd read position by one sector */
-void advanceCHSHdd(void);
+void advanceHddPosition(void);
 
 /* walks the chs position forward to the given linear lba. no fancy
    math needed: stepping through every position visits them in
    exactly lba order, and these drives are small enough that even a
    full-travel seek costs only fractions of a second */
-void seekToLBA(unsigned long target);
+void seekHdd(unsigned long target);
 
 /* reads one hdd sector into dest with retries. returns the bios
    status: 0 = clean read, 0x11 = read but ecc-corrected (both are
@@ -45,5 +44,7 @@ void seekToLBA(unsigned long target);
    and NOT to be dumped; caller records the code in the sector
    descriptor instead */
 unsigned char readHddResilient(unsigned char* dest);
+
+uint8_t isStatusSuccess(uint8_t status);
 
 #endif
