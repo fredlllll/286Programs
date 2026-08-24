@@ -24,7 +24,11 @@ struct ChsWithLBA
     uint32_t lba;
 };
 
-uint32_t ChsToLba(uint16_t c, uint8_t h, uint8_t s);
+/* standard chs -> lba conversion:
+   lba = (cylinder * heads + head) * sectors_per_track + (sector - 1).
+   the multiplies go through mul32_16 so intermediate values cannot
+   truncate at 16 bits */
+uint32_t ChsToLba(uint16_t c, uint8_t h, uint8_t s, const struct Geometry *geom);
 
 struct ChsWithLBA LbaToChsWithLba(uint32_t lba, const struct Geometry *geom);
 

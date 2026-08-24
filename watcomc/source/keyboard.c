@@ -46,9 +46,10 @@ void waitForEnter(char* prompt){
    the typed digits collect in buf; on enter they are folded into a
    number with v = v*10 + digit. the expression (v << 3) + (v << 1)
    is v*8 + v*2 = v*10, done with shifts because it is cheaper on an
-   80286 and avoids the watcom multiply helper */
+   80286 and avoids the watcom multiply helper. input is capped at
+   nine digits so the fold can never wrap around uint32 */
 uint32_t decInput(char* prompt, uint32_t defVal){
-  char buf[11];        /* max 10 digits + terminator */
+  char buf[11];        /* max 9 digits + terminator */
   uint8_t len;
   uint8_t k;
   uint8_t i;
@@ -82,7 +83,7 @@ uint32_t decInput(char* prompt, uint32_t defVal){
       }
     }
     if(k >= '0' && k <= '9'){      /* accept plain digits only */
-      if(len < 10){
+      if(len < 9){                 /* 9 digits max: no uint32 wrap */
         buf[len++] = k;
         printChar(k, 1);           /* echo */
       }

@@ -16,10 +16,9 @@
 #include "intdef.h"
 
 /* ---- hard disk geometry ----
-   factory geometry of the target mfm/rll drive. the startup prompts
-   allow overriding these because the bios may report something else
-   (drive translation, dead cmos battery), and recovery only lines up
-   with data written earlier when the exact same geometry is used */
+   factory geometry of the target mfm/rll drive. reads only line up
+   with data written earlier when the exact same geometry is used,
+   so these values double as the documentation of the expected drive */
 #define HDD_CYLS 820
 #define HDD_HEADS 6
 #define HDD_SPT 26              /* sectors per track */

@@ -6,6 +6,8 @@
 #include "print.h"
 #include <i86.h>
 
+struct ProgramState prgState;
+
 void ensureStartLbaLimit(uint32_t startLba)
 {
     if (startLba >= hddGeom.totalSectors)
@@ -146,9 +148,11 @@ struct SectorDesc
 
    physically written BEFORE the data it talks about, so the restorer
    can stream through the disk in one pass. count tells how many of
-   the DESC_PER_BLOCK slots are real; unused tail slots are zeroed.
-   the crc covers the entire first 510 bytes including those zeros,
-   so a damaged block is detected as a unit */
+   the DESC_PER_BLOCK slots are real; unused tail slots are zeroed at
+   flush time so every block emits deterministic bytes. the crc covers
+   count + all descriptor slots (the first 1 + DESC_PER_BLOCK*5 bytes,
+   including the zeroed tail) so a damaged block is detected as a
+   unit. crc and pad themselves are excluded from the coverage */
 
 #define DESC_PER_BLOCK (509 / sizeof(struct SectorDesc))
 
@@ -169,8 +173,8 @@ uint8_t currentDataIdx = 0;
 void writeOutBufferedData(void)
 {
     uint8_t i;
-    // write out and reset
-    // TODO: crc
+    struct SectorDesc zeroed = {0};
+    uint16_t crcCoverage = (uint16_t)(1 + DESC_PER_BLOCK * sizeof(struct SectorDesc));
     uint8_t neededSectors = 1;
     for (i = 0; i < currentDescriptorHeader.count; i++)
     {
@@ -179,6 +183,14 @@ void writeOutBufferedData(void)
             neededSectors++;
         }
     }
+
+    /* stale descriptors from earlier blocks must not leak into this
+       one: zero the tail, then stamp the crc over the clean block */
+    for (i = currentDescriptorHeader.count; i < DESC_PER_BLOCK; i++)
+    {
+        currentDescriptorHeader.desc[i] = zeroed;
+    }
+    currentDescriptorHeader.crc = crcBuf(0xFFFF, (uint8_t *)&currentDescriptorHeader, crcCoverage);
 
     if (FLOPPY_TOTAL_SECTORS - floppyPosition.lba < neededSectors)
     {
@@ -233,6 +245,10 @@ void addDescriptor(uint32_t lba, uint8_t status)
     }
 }
 
+/* set when the user hits esc during the copy loop; program() then
+   shuts down cleanly after the current descriptor block is flushed */
+static uint8_t stopRequested = 0;
+
 void processFloppy(void)
 {
     //uint32_t diskStartTicks = biosTicks();
@@ -241,6 +257,11 @@ void processFloppy(void)
 
     while (hddPos.lba < hddGeom.totalSectors)
     {
+        if (escPressed())
+        {
+            stopRequested = 1;
+            break;
+        }
         if (headMask & (1 << hddPos.head))
         {
             /* read straight into the next FREE data slot: failed sectors
@@ -285,6 +306,13 @@ void program(void)
     while (1)
     {
         processFloppy();
+        if (stopRequested)
+        {
+            print("\r\n=== STOPPED BY ESC ===\r\nResume next run at LBA ");
+            printDecLong(hddPos.lba);
+            print(".\r\nSafe to power off.\r\n");
+            halt();
+        }
         checkProgramEnd();
     }
 }

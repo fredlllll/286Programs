@@ -48,7 +48,7 @@ uint8_t readHddResilient(void __far *dest)
   {
     if (hddRetries > 1 && tries == hddRetries / 2)
     {
-      resetDiskSystem(); /* halfway through, try with a reset */
+      resetDiskSystem(0x80); /* halfway through, try with a reset */
     }
     status = readFromDrive(1, hddPos.cyl, hddPos.head, hddPos.sec, 0x80, dest);
     tries++;
@@ -63,7 +63,7 @@ uint8_t readHddResilient(void __far *dest)
   }
   else
   {
-    resetDiskSystem(); /* clean up controller state for next sector */
+    resetDiskSystem(0x80); /* clean up controller state for next sector */
   }
 
   print("HDD read fail CHS ");

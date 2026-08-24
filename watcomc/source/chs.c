@@ -1,9 +1,9 @@
 #include "chs.h"
 
-uint32_t ChsToLba(uint16_t c, uint8_t h, uint8_t s)
+uint32_t ChsToLba(uint16_t c, uint8_t h, uint8_t s, const struct Geometry *geom)
 {
-    uint16_t ch = c * h;
-    return ch * (s - 1);
+    uint32_t cylHead = mul32_16(c, geom->heads) + h;
+    return mul32_16(cylHead, geom->spt) + s - 1;
 }
 
 struct ChsWithLBA LbaToChsWithLba(uint32_t lba, const struct Geometry *geom)

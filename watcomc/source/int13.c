@@ -17,10 +17,11 @@ void stepChs(struct ChsWithLBA* pos, const struct Geometry* geom){
   pos->lba++;
 }
 
-void resetDiskSystem(void){
+void resetDiskSystem(uint8_t driveNumber){
   _asm{
-    xor ax,ax          ; ah = 0 = "reset disk system", dl already
-    int 0x13           ; holds the last used drive number
+    xor ax,ax          ; ah = 0 = "reset disk system"
+    mov dl, driveNumber
+    int 0x13
   };
 }
 

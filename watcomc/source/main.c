@@ -15,12 +15,11 @@
 //   util.c     crc, byte poking, fill patterns, tick counter
 //   definitions.h all tunable constants
 //
-// floppy layout (per disk), version 3:
-//   LBA 0      : header sector, see struct FloppyHeader in floppy.h
-//   LBA 1..9   : reserved (zeros)
-//   LBA 10..2879: repeating groups, one group per hdd track batch:
-//                  [descriptor block: 1 sector, struct DescBlock]
-//                  [the data sectors its entries refer to]
+// floppy layout (per disk): groups are written back to back starting
+// at lba 0 of a completely fresh floppy and repeat until the disk is
+// full. one group per hdd track batch:
+//   [descriptor block: 1 sector, struct DescBlock]
+//   [the data sectors its entries refer to]
 //
 // every dumped hdd sector carries its own identification in the
 // descriptor: lba (3 bytes), the int13 error/status code of the read

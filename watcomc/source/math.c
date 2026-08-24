@@ -57,21 +57,29 @@ uint32_t divLong(uint32_t num, uint16_t den){
   return q;
 }
 
-/* 
+/*
  * Divides a 32-bit dividend by a 16-bit divisor on a 286.
  * DX:AX holds the 32-bit dividend for the hardware DIV instruction.
  * Returns 16-bit quotient, writes remainder to *rem.
+ * A quotient that would not fit in 16 bits (or a zero divisor) would
+ * raise a divide error and lock up the machine - saturate instead so
+ * a stray call degrades into a visible wrong value.
  */
 uint16_t div32_16(uint32_t dividend, uint16_t divisor, uint16_t *rem) {
     uint16_t quot;
     uint16_t r;
 
-    _asm {
-        mov ax, word ptr [dividend]
-        mov dx, word ptr [dividend + 2]
-        div divisor
-        mov quot, ax
-        mov r, dx
+    if(divisor == 0 || (dividend >> 16) >= divisor){
+      quot = 0xFFFF;
+      r = 0xFFFF;
+    }else{
+      _asm {
+          mov ax, word ptr [dividend]
+          mov dx, word ptr [dividend + 2]
+          div divisor
+          mov quot, ax
+          mov r, dx
+      }
     }
 
     if(rem){

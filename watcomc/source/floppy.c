@@ -30,7 +30,7 @@ void seekFloppy(uint16_t c, uint8_t h, uint8_t s)
   tmp.cyl = c;
   tmp.head = h;
   tmp.sec = s;
-  tmp.lba = ChsToLba(c, h, s);
+  tmp.lba = ChsToLba(c, h, s, &floppyGeometry);
   floppyPosition = tmp;
 }
 
@@ -51,7 +51,7 @@ uint8_t writeFloppy(uint16_t c, uint8_t h, uint8_t s, void __far *src)
       tries++;
       if (status != 0)
       {
-        resetDiskSystem(); /* clear controller error state */
+        resetDiskSystem(0); /* clear controller error state */
       }
     } while (status != 0 && tries < RETRY_FLOPPY);
     if (status == 0)
@@ -64,7 +64,7 @@ uint8_t writeFloppy(uint16_t c, uint8_t h, uint8_t s, void __far *src)
       }
     }
     rounds++;
-    resetDiskSystem();
+    resetDiskSystem(0);
   }
 
   print("\r\nFLOPPY FAIL at ");

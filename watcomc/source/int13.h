@@ -43,8 +43,11 @@ void stepChs(struct ChsWithLBA* pos, const struct Geometry* geom);
 
 /* resets the disk controller. called between retries to clear error
    states. note: on an hdd this makes the drive recalibrate (loud
-   seek to cylinder 0 and back), so it is used sparingly there */
-void resetDiskSystem(void);
+   seek to cylinder 0 and back), so it is used sparingly there.
+   takes the drive number explicitly - relying on dl still holding
+   it from some earlier bios call would depend on register survival
+   across compiler-generated code */
+void resetDiskSystem(uint8_t driveNumber);
 
 /* reads numSectorsToRead consecutive sectors starting at the given
    chs position into destination. returns 0 on success, otherwise the
