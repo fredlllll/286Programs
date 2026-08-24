@@ -286,6 +286,16 @@ void processFloppy(void)
     {
         writeOutBufferedData();
     }
+    {
+        uint16_t rem;
+        uint16_t m = div32_16(biosTicks() - diskStartTicks, 1092, &rem);
+        uint16_t s = div32_16(rem, 18, 0);
+        print("\r\nDisk done in ");
+        printDecLong(m);
+        print("m ");
+        printDecLong(s);
+        print("s\r\n");
+    }
 }
 
 void checkProgramEnd(void)
