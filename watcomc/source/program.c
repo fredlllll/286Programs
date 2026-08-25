@@ -20,7 +20,7 @@ void ensureStartLbaLimit(uint32_t startLba)
 
 void printProgramStart(void)
 {
-    print("\r\n\r\nHDD saver 3.0\r\n");
+    print("HDD saver 3.0\r\n");
     print("Dumps ");
     printDecLong(hddGeom.totalSectors);
     print(" hdd sectors (");
@@ -30,7 +30,7 @@ void printProgramStart(void)
     print("sectors are just logged (with the drive's error code) and\r\n");
     print("cost no floppy space. Disk order does not matter.\r\n");
     print("Floppy writes are verified and retried automatically.\r\n");
-    print("ESC stops cleanly after the current transfer.\r\n\r\n");
+    print("ESC stops cleanly after the current transfer.\r\n");
 }
 
 void collectProgramInput(void)
@@ -288,7 +288,7 @@ void processFloppy(void)
         uint16_t rem;
         uint16_t m = div32_16(biosTicks() - diskStartTicks, 1092, &rem);
         uint16_t s = div32_16(rem, 18, 0);
-        print("\r\nDisk done in ");
+        print("\rDisk done in ");
         printDecLong(m);
         print("m ");
         printDecLong(s);
@@ -301,7 +301,7 @@ void checkProgramEnd(void)
     if (hddPos.lba >= hddGeom.totalSectors)
     {
         /* every sector of the drive has been through the pipeline */
-        print("\r\n=== DUMP COMPLETE ===\r\n");
+        print("\r=== DUMP COMPLETE ===\r\n");
         print("Safe to power off.\r\n");
         halt();
     }
@@ -311,14 +311,14 @@ void program(void)
 {
     printProgramStart();
     collectProgramInput();
-    print("\r\nStarting. Everything else runs by itself.\r\n");
+    print("Starting. Everything else runs by itself.\r\n");
 
     while (1)
     {
         processFloppy();
         if (stopRequested)
         {
-            print("\r\n=== STOPPED BY ESC ===\r\nResume next run at LBA ");
+            print("\r=== STOPPED BY ESC ===\r\nResume next run at LBA ");
             printDecLong(hddPos.lba);
             print(".\r\nSafe to power off.\r\n");
             halt();

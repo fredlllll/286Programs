@@ -67,7 +67,7 @@ uint8_t writeFloppy(uint16_t c, uint8_t h, uint8_t s, void __far *src)
     resetDiskSystem(0);
   }
 
-  print("\r\nFLOPPY FAIL at ");
+  print("\rFLOPPY FAIL at ");
   printDecLong(c);
   printChar('/', 1);
   printDecLong(h);
