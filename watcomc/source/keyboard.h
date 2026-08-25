@@ -27,4 +27,7 @@ uint8_t waitForContinue(char* prompt);
    empty input returns defVal unchanged */
 uint32_t decInput(char* prompt, uint32_t defVal);
 
+/* short beep on the pc speaker via timer channel 2 */
+void beep(void);
+
 #endif

@@ -33,16 +33,43 @@ uint8_t escPressed(void){
   return (k == 27) ? 1 : 0;
 }
 
+/* reads the bios timer tick counter at 0040:006c. fires ~18.2 times
+   per second on a pc-compatible, so 91 ticks ~= 5 seconds */
+static uint16_t biosTick(void){
+  volatile uint16_t ticks;
+  _asm{
+    mov ax, 0x0040
+    mov es, ax
+    mov ax, es:[0x006C]
+    mov ticks, ax
+  };
+  return ticks;
+}
+
 uint8_t waitForContinue(char* prompt){
   uint8_t k;
+  uint16_t lastBeep;
   print(prompt);
+  lastBeep = biosTick();
   while(1){
-    k = getNextKeyPress();
-    if(k == 0x0D){                   /* 0x0d = carriage return */
-      return 0;
+    _asm{
+      mov ah, 1          ; bios "key available?"
+      int 0x16
+      lahf
+      mov keyFlags, ah
+    };
+    if(!(keyFlags & 0x40)){          /* key is waiting */
+      k = getNextKeyPress();
+      if(k == 0x0D){                 /* 0x0d = carriage return */
+        return 0;
+      }
+      if(k == 27){                   /* esc = clean stop */
+        return 1;
+      }
     }
-    if(k == 27){                     /* esc = clean stop */
-      return 1;
+    if((uint16_t)(biosTick() - lastBeep) >= 91){
+      lastBeep = biosTick();
+      beep();
     }
   }
 }
@@ -53,6 +80,23 @@ uint8_t waitForContinue(char* prompt){
    is v*8 + v*2 = v*10, done with shifts because it is cheaper on an
    80286 and avoids the watcom multiply helper. input is capped at
    nine digits so the fold can never wrap around uint32 */
+void beep(void){
+  uint16_t i;
+  _asm{
+    in al, 0x61
+    or al, 3
+    out 0x61, al
+  };
+  for(i = 0; i < 1500; i++){
+    _asm nop;
+  };
+  _asm{
+    in al, 0x61
+    and al, 0xFC
+    out 0x61, al
+  };
+}
+
 uint32_t decInput(char* prompt, uint32_t defVal){
   char buf[11];        /* max 9 digits + terminator */
   uint8_t len;
