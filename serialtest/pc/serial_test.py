@@ -3,6 +3,8 @@ import ctypes
 from ctypes import wintypes
 
 kernel32 = ctypes.windll.kernel32
+GetLastError = kernel32.GetLastError
+FormatMessageA = kernel32.FormatMessageA
 
 GENERIC_READ = 0x80000000
 GENERIC_WRITE = 0x40000000
@@ -56,17 +58,25 @@ class COMMTIMEOUTS(ctypes.Structure):
         ("WriteTotalTimeoutConstant", wintypes.DWORD),
     ]
 
+def get_last_error():
+    code = GetLastError()
+    buf = ctypes.create_string_buffer(256)
+    FormatMessageA(0x1000, None, code, 0, buf, 256, None)
+    return "error %d: %s" % (code, buf.value.decode("ascii", errors="replace").strip())
+
 def open_serial(port, baud):
     name = "\\\\.\\" + port
     handle = kernel32.CreateFileA(
         name, GENERIC_READ | GENERIC_WRITE, 0, None,
         OPEN_EXISTING, 0, None)
     if handle == INVALID_HANDLE_VALUE:
+        print("CreateFileA failed: " + get_last_error())
         return None
 
     dcb = DCB()
     dcb.DCBlength = ctypes.sizeof(DCB)
     if not kernel32.GetCommState(handle, ctypes.byref(dcb)):
+        print("GetCommState failed: " + get_last_error())
         kernel32.CloseHandle(handle)
         return None
 
@@ -84,6 +94,7 @@ def open_serial(port, baud):
     dcb.fInX = 0
 
     if not kernel32.SetCommState(handle, ctypes.byref(dcb)):
+        print("SetCommState failed: " + get_last_error())
         kernel32.CloseHandle(handle)
         return None
 
