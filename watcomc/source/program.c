@@ -205,8 +205,7 @@ void writeOutBufferedData(void)
 
     while (1)
     {
-        uint8_t ok = 1;
-        ok &= writeVerified(&currentDescriptorHeader);
+        uint8_t ok = writeVerified(&currentDescriptorHeader);
         for (i = 0; i < currentDescriptorHeader.count; ++i)
         {
             uint8_t dataIdx = currentDescriptorHeader.desc[i].dataIdx;
@@ -221,6 +220,17 @@ void writeOutBufferedData(void)
         }
         if (waitForContinue("Floppy write impossible, give new one and press enter\r\n"))
         {
+            if (!writeVerified(&currentDescriptorHeader))
+            {
+                for (i = 0; i < currentDescriptorHeader.count; ++i)
+                {
+                    uint8_t dataIdx = currentDescriptorHeader.desc[i].dataIdx;
+                    if (dataIdx != DATAIDXNOTWRITTEN)
+                    {
+                        writeVerified(dataSlot(dataIdx));
+                    }
+                }
+            }
             stopRequested = 1;
             return;
         }
