@@ -33,11 +33,16 @@ uint8_t escPressed(void){
   return (k == 27) ? 1 : 0;
 }
 
-void waitForEnter(char* prompt){
+uint8_t waitForContinue(char* prompt){
+  uint8_t k;
   print(prompt);
   while(1){
-    if(getNextKeyPress() == 0x0D){   /* 0x0d = carriage return */
-      return;
+    k = getNextKeyPress();
+    if(k == 0x0D){                   /* 0x0d = carriage return */
+      return 0;
+    }
+    if(k == 27){                     /* esc = clean stop */
+      return 1;
     }
   }
 }

@@ -18,8 +18,9 @@ uint8_t getNextKeyPress(void);
    escape was pressed, 0 otherwise (or if some other key is waiting) */
 uint8_t escPressed(void);
 
-/* prints prompt, then waits for enter. empty string allowed */
-void waitForEnter(char* prompt);
+/* prints prompt, then waits for enter or esc. returns 0 on enter,
+   1 on esc. empty string allowed */
+uint8_t waitForContinue(char* prompt);
 
 /* prints "prompt [default]: " and lets the user type a decimal
    number. digits are echoed, backspace edits, enter submits, an

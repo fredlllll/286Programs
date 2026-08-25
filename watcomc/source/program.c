@@ -169,6 +169,8 @@ struct DescBlock
 
 uint8_t currentDataIdx = 0;
 
+static uint8_t stopRequested = 0;
+
 void writeOutBufferedData(void)
 {
     uint8_t i;
@@ -193,7 +195,11 @@ void writeOutBufferedData(void)
 
     if (FLOPPY_TOTAL_SECTORS - floppyPosition.lba < neededSectors)
     {
-        waitForEnter("Floppy is full, put a new one in and press enter\r\n");
+        if (waitForContinue("Floppy is full, put a new one in and press enter\r\n"))
+        {
+            stopRequested = 1;
+            return;
+        }
         seekFloppy(0, 0, 1);
     }
 
@@ -213,7 +219,11 @@ void writeOutBufferedData(void)
         {
             break;
         }
-        waitForEnter("Floppy write impossible, give new one and press enter\r\n");
+        if (waitForContinue("Floppy write impossible, give new one and press enter\r\n"))
+        {
+            stopRequested = 1;
+            return;
+        }
         seekFloppy(0, 0, 1);
     }
     currentDescriptorHeader.count = 0;
@@ -244,10 +254,6 @@ void addDescriptor(uint32_t lba, uint8_t status)
     }
 }
 
-/* set when the user hits esc during the copy loop; program() then
-   shuts down cleanly after the current descriptor block is flushed */
-static uint8_t stopRequested = 0;
-
 void processFloppy(void)
 {
     uint32_t diskStartTicks = biosTicks();
@@ -256,7 +262,7 @@ void processFloppy(void)
 
     while (hddPos.lba < hddGeom.totalSectors)
     {
-        if (escPressed())
+        if (stopRequested || escPressed())
         {
             stopRequested = 1;
             break;
