@@ -195,11 +195,13 @@ void writeOutBufferedData(void)
 
     if (FLOPPY_TOTAL_SECTORS - floppyPosition.lba < neededSectors)
     {
+        uint32_t wstart = biosTicks();
         if (waitForContinue("Floppy is full, put a new one in and press enter\r\n"))
         {
             stopRequested = 1;
             return;
         }
+        addWaitTicks(biosTicks() - wstart);
         seekFloppy(0, 0, 1);
     }
 
@@ -218,21 +220,26 @@ void writeOutBufferedData(void)
         {
             break;
         }
-        if (waitForContinue("Floppy write impossible, give new one and press enter\r\n"))
         {
-            if (!writeVerified(&currentDescriptorHeader))
+            uint32_t wstart = biosTicks();
+            if (waitForContinue("Floppy write impossible, give new one and press enter\r\n"))
             {
-                for (i = 0; i < currentDescriptorHeader.count; ++i)
+                addWaitTicks(biosTicks() - wstart);
+                if (!writeVerified(&currentDescriptorHeader))
                 {
-                    uint8_t dataIdx = currentDescriptorHeader.desc[i].dataIdx;
-                    if (dataIdx != DATAIDXNOTWRITTEN)
+                    for (i = 0; i < currentDescriptorHeader.count; ++i)
                     {
-                        writeVerified(dataSlot(dataIdx));
+                        uint8_t dataIdx = currentDescriptorHeader.desc[i].dataIdx;
+                        if (dataIdx != DATAIDXNOTWRITTEN)
+                        {
+                            writeVerified(dataSlot(dataIdx));
+                        }
                     }
                 }
+                stopRequested = 1;
+                return;
             }
-            stopRequested = 1;
-            return;
+            addWaitTicks(biosTicks() - wstart);
         }
         seekFloppy(0, 0, 1);
     }
@@ -269,6 +276,7 @@ void processFloppy(void)
     uint32_t diskStartTicks = biosTicks();
     uint8_t status;
     currentDescriptorHeaderFloppyLba = 0;
+    resetWaitTicks();
 
     while (hddPos.lba < hddGeom.totalSectors)
     {
