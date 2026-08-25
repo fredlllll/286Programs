@@ -1,59 +1,20 @@
 """Raw floppy drive access and the read command."""
 
 import argparse
-import ctypes
 import os
 import struct
 import sys
 import time
-from ctypes import wintypes
 
 from format import (DISK_BYTES, SECTOR, DESC_PER_BLOCK, ENTRY_SIZE,
                     has_data, ST_HEADSKIP, crc16, evaluate_image, iter_groups)
+from windrive import WinDrive
 
 RETRY_SECTORS: int = 4
 
 
-def _open_drive(letter: str) -> tuple[ctypes.WinDLL, wintypes.HANDLE]:
-    """Open a physical drive for raw access. Returns (k32, handle)."""
-    k32 = ctypes.WinDLL('kernel32', use_last_error=True)
-    k32.CreateFileW.restype = wintypes.HANDLE
-    k32.CreateFileW.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD,
-                                wintypes.LPVOID, wintypes.DWORD, wintypes.DWORD,
-                                wintypes.HANDLE]
-    k32.ReadFile.argtypes = [wintypes.HANDLE, wintypes.LPVOID, wintypes.DWORD,
-                             ctypes.POINTER(wintypes.DWORD), wintypes.LPVOID]
-    k32.SetFilePointer.argtypes = [wintypes.HANDLE, ctypes.c_long,
-                                   ctypes.POINTER(ctypes.c_long), wintypes.DWORD]
-    k32.CloseHandle.argtypes = [wintypes.HANDLE]
-
-    invalid = wintypes.HANDLE(-1).value
-    path = '\\\\.\\%s:' % letter.upper()
-    handle = k32.CreateFileW(path, 0x80000000, 0x1 | 0x2, None, 3, 0, None)
-    while handle == invalid:
-        print('Cannot open %s (winerror %d). Is a disk inserted?' % (
-            path, ctypes.get_last_error()))
-        ans = input('Retry? [Y/n] ').strip().lower()
-        if ans.startswith('n'):
-            sys.exit(1)
-        handle = k32.CreateFileW(path, 0x80000000, 0x1 | 0x2, None, 3, 0, None)
-    return k32, handle
-
-
-def _read_sector(k32: ctypes.WinDLL, handle: wintypes.HANDLE,
-                 byte_offset: int, buf: bytearray) -> bool:
-    """Read one 512-byte sector from byte_offset into buf."""
-    k32.SetFilePointer(handle, byte_offset, None, 0)
-    rb = ctypes.create_string_buffer(SECTOR)
-    got = wintypes.DWORD(0)
-    if k32.ReadFile(handle, rb, SECTOR, ctypes.byref(got), None) and got.value == SECTOR:
-        buf[byte_offset:byte_offset + SECTOR] = rb.raw
-        return True
-    return False
-
-
-def _retry_bad_crc_blocks(k32: ctypes.WinDLL, handle: wintypes.HANDLE,
-                          buf: bytearray, img: bytes) -> int:
+def _retry_bad_crc_blocks(drv: WinDrive, buf: bytearray,
+                          img: bytes) -> int:
     """Re-read sectors whose descriptor block CRC failed. Returns retry count."""
     retries = 0
     pos = 0
@@ -69,7 +30,9 @@ def _retry_bad_crc_blocks(k32: ctypes.WinDLL, handle: wintypes.HANDLE,
         if not crc_ok:
             for _attempt in range(RETRY_SECTORS):
                 retries += 1
-                if _read_sector(k32, handle, pos, buf):
+                data = drv.read_sector(pos)
+                if data is not None:
+                    buf[pos:pos + SECTOR] = data
                     block_new = bytes(buf[pos:pos + SECTOR])
                     crc_ok_new = struct.unpack_from('<H', block_new, 506)[0] \
                         == crc16(bytes(block_new[0:506]))
@@ -90,12 +53,9 @@ def read_drive(letter: str, expect_bytes: int = DISK_BYTES) -> tuple[bytes, list
     After the initial bulk read, every descriptor block whose CRC
     fails is re-read sector by sector (up to RETRY_SECTORS times)
     to recover from soft read errors."""
-    k32, handle = _open_drive(letter)
-
-    buf = bytearray(expect_bytes)
-    errors: list[tuple[int, int]] = []
-    try:
-        k32.DeviceIoControl(handle, 0x00090018, None, 0, None, 0, None, None)
+    with WinDrive(letter) as drv:
+        buf = bytearray(expect_bytes)
+        errors: list[tuple[int, int]] = []
         pos = 0
         chunk = 65536
         t0 = time.time()
@@ -109,17 +69,11 @@ def read_drive(letter: str, expect_bytes: int = DISK_BYTES) -> tuple[bytes, list
                 s //= 2
             done = False
             for sz in sizes:
-                rb = ctypes.create_string_buffer(sz)
-                for _attempt in range(2):
-                    got = wintypes.DWORD(0)
-                    if k32.ReadFile(handle, rb, sz, ctypes.byref(got), None) \
-                            and got.value == sz:
-                        buf[pos:pos + sz] = rb.raw
-                        pos += sz
-                        done = True
-                        break
-                    k32.SetFilePointer(handle, pos, None, 0)
-                if done:
+                data = drv.read(pos, sz)
+                if data is not None:
+                    buf[pos:pos + sz] = data
+                    pos += sz
+                    done = True
                     break
             if not done:
                 errors.append((pos, n))
@@ -134,7 +88,7 @@ def read_drive(letter: str, expect_bytes: int = DISK_BYTES) -> tuple[bytes, list
         print('\rbulk read done, checking CRCs...              ', end='',
               flush=True)
 
-        retries = _retry_bad_crc_blocks(k32, handle, buf, bytes(buf))
+        retries = _retry_bad_crc_blocks(drv, buf, bytes(buf))
         bad_crcs = sum(1 for g in iter_groups(bytes(buf)) if not g['crc_ok'])
         if retries:
             print('\rretried %d sector(s), %d CRC error(s) remaining   '
@@ -142,8 +96,6 @@ def read_drive(letter: str, expect_bytes: int = DISK_BYTES) -> tuple[bytes, list
         else:
             print('\rno CRC errors - disk is clean                     ',
                   flush=True)
-    finally:
-        k32.CloseHandle(handle)
     return bytes(buf), errors
 
 
