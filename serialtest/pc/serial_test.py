@@ -66,11 +66,13 @@ def get_last_error():
 
 def open_serial(port, baud):
     name = "\\\\.\\" + port
+    print("trying device path: " + name)
     handle = kernel32.CreateFileA(
         name, GENERIC_READ | GENERIC_WRITE, 0, None,
         OPEN_EXISTING, 0, None)
     if handle == INVALID_HANDLE_VALUE:
         print("CreateFileA failed: " + get_last_error())
+        print("(try running as administrator)")
         return None
 
     dcb = DCB()
@@ -119,7 +121,48 @@ def serial_read(handle, count):
     kernel32.ReadFile(handle, buf, count, ctypes.byref(read), None)
     return buf.raw[:read.value]
 
+def list_serial_ports():
+    """check registry for actual serial ports the OS knows about"""
+    advapi32 = ctypes.windll.advapi32
+    HKEY_LOCAL_MACHINE = 0x80000002
+    KEY_READ = 0x20019
+    phkResult = wintypes.HKEY()
+
+    rc = advapi32.RegOpenKeyExA(
+        HKEY_LOCAL_MACHINE,
+        b"HARDWARE\\DEVICEMAP\\SERIALCOMM",
+        0, KEY_READ, ctypes.byref(phkResult))
+    if rc != 0:
+        print("no serial ports found in registry (rc=%d)" % rc)
+        return
+
+    print("serial ports in registry:")
+    i = 0
+    while True:
+        valname = ctypes.create_string_buffer(256)
+        valdata = ctypes.create_string_buffer(256)
+        namelen = wintypes.DWORD(256)
+        datalen = wintypes.DWORD(256)
+        rc = advapi32.RegEnumValueA(
+            phkResult, i, valname, ctypes.byref(namelen),
+            None, None, valdata, ctypes.byref(datalen))
+        if rc != 0:
+            break
+        print("  " + valname.value.decode("ascii", errors="replace") +
+              " -> " + valdata.value.decode("ascii", errors="replace"))
+        i += 1
+        namelen = wintypes.DWORD(256)
+        datalen = wintypes.DWORD(256)
+
+    advapi32.RegCloseKey(phkResult)
+
+    if i == 0:
+        print("  (none)")
+
 def main():
+    list_serial_ports()
+    print("")
+
     port = "COM1"
     if len(sys.argv) > 1:
         port = sys.argv[1]
