@@ -1,0 +1,8 @@
+{
+  "profiles": {
+    "SerialTest": {
+      "commandName": "Project",
+      "commandLineArgs": "COM3"
+    }
+  }
+}
