@@ -49,7 +49,7 @@ def _read_sector(k32, handle, byte_offset, buf):
     rb = ctypes.create_string_buffer(SECTOR)
     got = wintypes.DWORD(0)
     if k32.ReadFile(handle, rb, SECTOR, ctypes.byref(got), None) and got.value == SECTOR:
-        buf[:SECTOR] = rb.raw
+        buf[byte_offset:byte_offset + SECTOR] = rb.raw
         return True
     return False
 
