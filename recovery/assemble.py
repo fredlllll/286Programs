@@ -1,17 +1,19 @@
 """Stitch all dump floppies into one hdd.img and write a report."""
 
+import argparse
 import glob
 import os
 import sys
 import time
 
-from format import SECTOR, ST_HEADSKIP, has_data, status_name, evaluate_image
+from format import (SECTOR, ST_HEADSKIP, has_data, status_name,
+                    evaluate_image, GroupDict, EvalDict)
 
 
-def load_dumps(dumps_dir):
+def load_dumps(dumps_dir: str) -> tuple[list[dict], list[tuple[str, str]]]:
     """Load all .raw files from dumps_dir. Returns (records, rejected)."""
-    records = []
-    rejected = []
+    records: list[dict] = []
+    rejected: list[tuple[str, str]] = []
     for fn in sorted(glob.glob(os.path.join(dumps_dir, '*.raw'))):
         with open(fn, 'rb') as f:
             image = f.read()
@@ -24,7 +26,8 @@ def load_dumps(dumps_dir):
     return records, rejected
 
 
-def run_assembly(dumps_dir, out_path, total, verbose=True):
+def run_assembly(dumps_dir: str, out_path: str, total: int,
+                 verbose: bool = True) -> dict:
     """Stitch all dumps into one image. Returns report dict.
 
     Placement rules, per descriptor:
@@ -43,9 +46,9 @@ def run_assembly(dumps_dir, out_path, total, verbose=True):
     image_out = bytearray(total * SECTOR)
     covered = bytearray(total)
     suspect = bytearray(total)
-    err_codes = {}        # lba -> bios status of the failed read
-    headskipped_lbas = set()
-    overlaps = []
+    err_codes: dict[int, int] = {}
+    headskipped_lbas: set[int] = set()
+    overlaps: list[tuple[str, int]] = []
     upgrades_total = 0
 
     for rec in records:
@@ -83,24 +86,13 @@ def run_assembly(dumps_dir, out_path, total, verbose=True):
             overlaps.append((rec['file'], ov))
         upgrades_total += upgraded
 
-    gaps = []
-    run_start = None
-    for lba in range(total):
-        attempted = covered[lba] or lba in err_codes or lba in headskipped_lbas
-        if not attempted and run_start is None:
-            run_start = lba
-        elif attempted and run_start is not None:
-            gaps.append((run_start, lba - 1))
-            run_start = None
-    if run_start is not None:
-        gaps.append((run_start, total - 1))
-
+    gaps = _find_gaps(total, covered, err_codes, headskipped_lbas)
     coverage = sum(covered)
 
     with open(out_path, 'wb') as f:
         f.write(image_out)
 
-    report = {
+    report: dict = {
         'gaps': gaps,
         'chosen_files': [r['file'] for r in records],
         'err_codes': err_codes,
@@ -121,8 +113,72 @@ def run_assembly(dumps_dir, out_path, total, verbose=True):
     return report
 
 
-def write_report(path, rep, dumps_dir):
-    lines = []
+def _find_gaps(total: int, covered: bytearray, err_codes: dict[int, int],
+               headskipped_lbas: set[int]) -> list[tuple[int, int]]:
+    """Find contiguous ranges of LBAs that were never attempted."""
+    gaps: list[tuple[int, int]] = []
+    run_start: int | None = None
+    for lba in range(total):
+        attempted = covered[lba] or lba in err_codes or lba in headskipped_lbas
+        if not attempted and run_start is None:
+            run_start = lba
+        elif attempted and run_start is not None:
+            gaps.append((run_start, lba - 1))
+            run_start = None
+    if run_start is not None:
+        gaps.append((run_start, total - 1))
+    return gaps
+
+
+def missing_lba_ranges(rep: dict) -> tuple[list[tuple[int, int]], list[tuple[int, int]]]:
+    """Compute two lists of (start, end) LBA ranges from an assembly report.
+
+    truly_missing:   LBAs with no data, no error log, not headskipped.
+                     (these are the 'gaps' in the report)
+    missing_or_skipped: same, plus LBAs that were headskipped.
+    """
+    truly_missing = rep['gaps']
+
+    problem: set[int] = set(rep['headskipped_lbas'])
+    for g0, g1 in truly_missing:
+        for lba in range(g0, g1 + 1):
+            problem.add(lba)
+
+    missing_or_skipped: list[tuple[int, int]] = []
+    run_start: int | None = None
+    prev = -2
+    for lba in sorted(problem):
+        if lba == prev + 1:
+            prev = lba
+        else:
+            if run_start is not None:
+                missing_or_skipped.append((run_start, prev))
+            run_start = lba
+            prev = lba
+    if run_start is not None:
+        missing_or_skipped.append((run_start, prev))
+
+    return truly_missing, missing_or_skipped
+
+
+def _wrap_integers(values: list[int], indent: int, width: int) -> list[str]:
+    """Format a list of integers into lines that stay under 'width' chars."""
+    prefix = ' ' * indent
+    lines: list[str] = []
+    line = prefix
+    for v in values:
+        candidate = line + ' %d' % v
+        if len(candidate) > width and line != prefix:
+            lines.append(line)
+            line = prefix
+        line += ' %d' % v
+    if line.strip():
+        lines.append(line)
+    return lines
+
+
+def write_report(path: str, rep: dict, dumps_dir: str) -> None:
+    lines: list[str] = []
     ap = lines.append
     ap('HDD recovery assembly report')
     ap('generated : %s' % time.strftime('%Y-%m-%d %H:%M:%S'))
@@ -161,15 +217,14 @@ def write_report(path, rep, dumps_dir):
     if rep['err_codes']:
         ap('')
         ap('=== read failures by code ===')
-        by_code = {}
+        by_code: dict[int, list[int]] = {}
         for lba, code in sorted(rep['err_codes'].items()):
             by_code.setdefault(code, []).append(lba)
         for code in sorted(by_code):
             lbas = by_code[code]
             ap('  0x%02x %-22s : %d sectors' % (
                 code, status_name(code), len(lbas)))
-            wrapped = _wrap_integers(lbas, indent=4, width=74)
-            for line in wrapped:
+            for line in _wrap_integers(lbas, indent=4, width=74):
                 ap(line)
     if rep['gaps']:
         ap('')
@@ -189,54 +244,7 @@ def write_report(path, rep, dumps_dir):
         f.write('\n'.join(lines) + '\n')
 
 
-def _wrap_integers(values, indent, width):
-    """Format a list of integers into lines that stay under 'width' chars."""
-    prefix = ' ' * indent
-    lines = []
-    line = prefix
-    for v in values:
-        candidate = line + ' %d' % v
-        if len(candidate) > width and line != prefix:
-            lines.append(line)
-            line = prefix
-        line += ' %d' % v
-    if line.strip():
-        lines.append(line)
-    return lines
-
-
-def missing_lba_ranges(rep):
-    """Compute two lists of (start, end) LBA ranges from an assembly report.
-
-    truly_missing:   LBAs with no data, no error log, not headskipped.
-                     (these are the 'gaps' in the report)
-    missing_or_skipped: same, plus LBAs that were headskipped.
-    """
-    truly_missing = rep['gaps']
-
-    problem = set(rep['headskipped_lbas'])
-    for g0, g1 in truly_missing:
-        for lba in range(g0, g1 + 1):
-            problem.add(lba)
-
-    missing_or_skipped = []
-    run_start = None
-    prev = -2
-    for lba in sorted(problem):
-        if lba == prev + 1:
-            prev = lba
-        else:
-            if run_start is not None:
-                missing_or_skipped.append((run_start, prev))
-            run_start = lba
-            prev = lba
-    if run_start is not None:
-        missing_or_skipped.append((run_start, prev))
-
-    return truly_missing, missing_or_skipped
-
-
-def cmd_missing(args):
+def cmd_missing(args: argparse.Namespace) -> None:
     total = args.cyls * args.heads * args.spt
     rep = run_assembly(args.dumps, os.devnull, total, verbose=False)
     truly_missing, missing_or_skipped = missing_lba_ranges(rep)
@@ -259,7 +267,7 @@ def cmd_missing(args):
         print('  none')
 
 
-def print_assembly_summary(rep, out_path, report_path):
+def print_assembly_summary(rep: dict, out_path: str, report_path: str) -> None:
     print('Disks used   : %d (%d files rejected)'
           % (len(rep['chosen_files']), len(rep['rejected'])))
     print('Coverage     : %d / %d sectors (%.2f%%)'

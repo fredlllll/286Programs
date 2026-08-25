@@ -1,5 +1,6 @@
 """Synthetic round-trip test of the assembler logic."""
 
+import argparse
 import os
 import struct
 import sys
@@ -10,16 +11,18 @@ from format import (SECTOR, DISK_BYTES, DESC_PER_BLOCK, ENTRY_SIZE,
 from assemble import run_assembly, missing_lba_ranges
 
 
-def fake_sector(lba):
+def fake_sector(lba: int) -> bytes:
     return bytes(((lba * 7 + j * 13 + (j >> 4)) & 0xFF) for j in range(SECTOR))
 
 
-def good_range(lo, hi):
+def good_range(lo: int, hi: int) -> list[tuple[int, int]]:
     """Produce (lba, ST_OK) pairs for every lba in [lo, hi)."""
     return [(l, ST_OK) for l in range(lo, hi)]
 
 
-def make_disk(seq, total, corrupt_group=None, corrupt_byte=None):
+def make_disk(seq: list[tuple[int, int]], total: int,
+              corrupt_group: int | None = None,
+              corrupt_byte: int | None = None) -> bytes:
     """Build a 1.44MB image exactly like the 286 tool writes it.
 
     seq: ordered list of (lba, status) pairs this disk covers. Data is
@@ -34,7 +37,7 @@ def make_disk(seq, total, corrupt_group=None, corrupt_byte=None):
     for gi, grp in enumerate(groups):
         block = bytearray(SECTOR)
         block[0] = len(grp)
-        datas = []
+        datas: list[bytes] = []
         for k, (lba, st) in enumerate(grp):
             off = 1 + k * ENTRY_SIZE
             block[off:off + 3] = lba.to_bytes(3, 'little')
@@ -53,15 +56,15 @@ def make_disk(seq, total, corrupt_group=None, corrupt_byte=None):
     return bytes(img)
 
 
-def _write_file(directory, name, data):
+def _write_file(directory: str, name: str, data: bytes) -> None:
     with open(os.path.join(directory, name), 'wb') as f:
         f.write(data)
 
 
-def cmd_selftest(args):
+def cmd_selftest(args: argparse.Namespace) -> None:
     """Synthetic round-trip: generate disks like the 286 would write them,
     then check that run_assembly reconstructs and reports correctly."""
-    checks = []
+    checks: list[tuple[str, bool]] = []
 
     # scenario A: ONE disk covers a whole (small) drive, with one dead
     # sector (lba 5, bios error 0x04 logged in its descriptor), one

@@ -1,5 +1,6 @@
 """Emulator test helpers: mkpattern and verify commands."""
 
+import argparse
 import hashlib
 import os
 import struct
@@ -10,12 +11,12 @@ from format import SECTOR, ST_HEADSKIP, has_data
 from assemble import load_dumps
 
 
-def pattern_sector(lba):
+def pattern_sector(lba: int) -> bytes:
     """Deterministic fake-HDD sector content, purely a function of its LBA."""
     return hashlib.sha256(struct.pack('<I', lba)).digest() * 16
 
 
-def cmd_mkpattern(args):
+def cmd_mkpattern(args: argparse.Namespace) -> None:
     t0 = time.time()
     buf = bytearray()
     with open(args.out, 'wb') as f:
@@ -30,15 +31,18 @@ def cmd_mkpattern(args):
           % (args.out, args.total, args.total * SECTOR, time.time() - t0))
 
 
-def load_placement(dumps_dir, total):
-    """Covered-LBA map, error map and headskip set, merged across ALL dumps."""
+def load_placement(dumps_dir: str, total: int) -> tuple[bytearray, dict[int, int], set[int], int]:
+    """Covered-LBA map, error map and headskip set, merged across ALL dumps.
+
+    Returns (covered, errs, skips, ndisks).
+    """
     records, _rejected = load_dumps(dumps_dir)
     covered = bytearray(total)
-    errs = {}
-    skips = set()
+    errs: dict[int, int] = {}
+    skips: set[int] = set()
     for rec in records:
         for g in rec['ev']['groups']:
-            for lba, st, didx in g['entries']:
+            for lba, st, _didx in g['entries']:
                 if lba >= total:
                     continue
                 if has_data(st):
@@ -50,7 +54,7 @@ def load_placement(dumps_dir, total):
     return covered, errs, skips, len(records)
 
 
-def cmd_verify(args):
+def cmd_verify(args: argparse.Namespace) -> None:
     data = open(args.image, 'rb').read()
     if len(data) % SECTOR:
         print('WARNING: image size %d not a multiple of %d'
@@ -58,11 +62,13 @@ def cmd_verify(args):
     total_img = min(len(data) // SECTOR, args.total)
     covered, errs, skips, ndisks = load_placement(args.dumps, args.total)
     zero = bytes(SECTOR)
-    tallies = {'ok': 0, 'readerror-declared': 0, 'headskipped': 0,
-               'missing': 0, 'MISMATCH': 0}
-    samples = {}
+    tallies: dict[str, int] = {
+        'ok': 0, 'readerror-declared': 0, 'headskipped': 0,
+        'missing': 0, 'MISMATCH': 0,
+    }
+    samples: dict[str, list[int]] = {}
 
-    def note(cls, lba):
+    def note(cls: str, lba: int) -> None:
         samples.setdefault(cls, [])
         if len(samples[cls]) < 8:
             samples[cls].append(lba)

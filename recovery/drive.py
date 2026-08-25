@@ -1,5 +1,6 @@
 """Raw floppy drive access and the read command."""
 
+import argparse
 import ctypes
 import os
 import struct
@@ -10,11 +11,11 @@ from ctypes import wintypes
 from format import (DISK_BYTES, SECTOR, DESC_PER_BLOCK, ENTRY_SIZE,
                     has_data, ST_HEADSKIP, crc16, evaluate_image, iter_groups)
 
-RETRY_SECTORS = 4
+RETRY_SECTORS: int = 4
 
 
-def _open_drive(letter):
-    """Open a physical drive for raw access. Returns handle."""
+def _open_drive(letter: str) -> tuple[ctypes.WinDLL, wintypes.HANDLE]:
+    """Open a physical drive for raw access. Returns (k32, handle)."""
     k32 = ctypes.WinDLL('kernel32', use_last_error=True)
     k32.CreateFileW.restype = wintypes.HANDLE
     k32.CreateFileW.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD,
@@ -39,8 +40,9 @@ def _open_drive(letter):
     return k32, handle
 
 
-def _read_sector(k32, handle, byte_offset, buf):
-    """Read one 512-byte sector from byte_offset into buf. Returns True on success."""
+def _read_sector(k32: ctypes.WinDLL, handle: wintypes.HANDLE,
+                 byte_offset: int, buf: bytearray) -> bool:
+    """Read one 512-byte sector from byte_offset into buf."""
     k32.SetFilePointer(handle, byte_offset, None, 0)
     rb = ctypes.create_string_buffer(SECTOR)
     got = wintypes.DWORD(0)
@@ -50,7 +52,8 @@ def _read_sector(k32, handle, byte_offset, buf):
     return False
 
 
-def _retry_bad_crc_blocks(k32, handle, buf, img):
+def _retry_bad_crc_blocks(k32: ctypes.WinDLL, handle: wintypes.HANDLE,
+                          buf: bytearray, img: bytes) -> int:
     """Re-read sectors whose descriptor block CRC failed. Returns retry count."""
     retries = 0
     pos = 0
@@ -64,7 +67,7 @@ def _retry_bad_crc_blocks(k32, handle, buf, img):
         crc_ok = struct.unpack_from('<H', block, 506)[0] \
             == crc16(bytes(block[0:506]))
         if not crc_ok:
-            for attempt in range(RETRY_SECTORS):
+            for _attempt in range(RETRY_SECTORS):
                 retries += 1
                 if _read_sector(k32, handle, pos, buf):
                     block_new = bytes(buf[pos:pos + SECTOR])
@@ -81,7 +84,7 @@ def _retry_bad_crc_blocks(k32, handle, buf, img):
     return retries
 
 
-def read_drive(letter, expect_bytes=DISK_BYTES):
+def read_drive(letter: str, expect_bytes: int = DISK_BYTES) -> tuple[bytes, list[tuple[int, int]]]:
     r"""Read a whole floppy from \\.\X:. Returns (data, error_regions).
 
     After the initial bulk read, every descriptor block whose CRC
@@ -90,7 +93,7 @@ def read_drive(letter, expect_bytes=DISK_BYTES):
     k32, handle = _open_drive(letter)
 
     buf = bytearray(expect_bytes)
-    errors = []
+    errors: list[tuple[int, int]] = []
     try:
         k32.DeviceIoControl(handle, 0x00090018, None, 0, None, 0, None, None)
         pos = 0
@@ -99,7 +102,7 @@ def read_drive(letter, expect_bytes=DISK_BYTES):
         next_progress = 0
         while pos < expect_bytes:
             n = min(chunk, expect_bytes - pos)
-            sizes = []
+            sizes: list[int] = []
             s = min(chunk, n)
             while s >= SECTOR:
                 sizes.append(s)
@@ -107,7 +110,7 @@ def read_drive(letter, expect_bytes=DISK_BYTES):
             done = False
             for sz in sizes:
                 rb = ctypes.create_string_buffer(sz)
-                for attempt in range(2):
+                for _attempt in range(2):
                     got = wintypes.DWORD(0)
                     if k32.ReadFile(handle, rb, sz, ctypes.byref(got), None) \
                             and got.value == sz:
@@ -147,11 +150,11 @@ def read_drive(letter, expect_bytes=DISK_BYTES):
 # ---------------------------------------------------------------- read cmd
 
 
-def read_one_disk(src, dumps_dir):
+def read_one_disk(src: str, dumps_dir: str) -> None:
     if os.path.isfile(src):
         with open(src, 'rb') as f:
             image = f.read(DISK_BYTES)
-        errors = []
+        errors: list[tuple[int, int]] = []
         print('Read %d bytes from file %s' % (len(image), src))
     elif os.name == 'nt' and len(src) == 1 and src.isalpha():
         input('Insert the floppy into drive %s: and press Enter...' % src.upper())
@@ -194,7 +197,7 @@ def read_one_disk(src, dumps_dir):
     print('Saved %s' % out_path)
 
 
-def cmd_read(args):
+def cmd_read(args: argparse.Namespace) -> None:
     while True:
         read_one_disk(args.drive, args.dumps)
         try:
