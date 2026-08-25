@@ -8,6 +8,7 @@ Subcommands:
   mkpattern create a fake HDD image for emulator testing
   verify    check assembled hdd.img against mkpattern data
   badmap    svg graphic: per-head good/bad sector map
+  missing   print missing LBA ranges
 
 Typical workflow:
   python process_floppy.py read --drive A --dumps dumps      (repeat per disk)
@@ -19,7 +20,7 @@ No third party dependencies, stdlib only.
 import argparse
 
 from drive import cmd_read
-from assemble import run_assembly
+from assemble import run_assembly, cmd_missing
 from selftest import cmd_selftest
 from emutest import cmd_mkpattern, cmd_verify
 from badmap import cmd_badmap
@@ -69,6 +70,14 @@ def main():
     p.add_argument('--heads', type=int, default=6)
     p.add_argument('--spt', type=int, default=26)
     p.set_defaults(fn=cmd_badmap)
+
+    p = sub.add_parser('missing',
+                       help='print missing LBA ranges')
+    p.add_argument('--dumps', default='dumps')
+    p.add_argument('--cyls', type=int, default=820)
+    p.add_argument('--heads', type=int, default=6)
+    p.add_argument('--spt', type=int, default=26)
+    p.set_defaults(fn=cmd_missing)
 
     args = ap.parse_args()
     args.fn(args)

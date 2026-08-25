@@ -7,7 +7,7 @@ import tempfile
 
 from format import (SECTOR, DISK_BYTES, DESC_PER_BLOCK, ENTRY_SIZE,
                     ST_OK, ST_HEADSKIP, has_data, crc16)
-from assemble import run_assembly
+from assemble import run_assembly, missing_lba_ranges
 
 
 def fake_sector(lba):
@@ -119,6 +119,37 @@ def cmd_selftest(args):
         checks.append(('C upgrade happened', rep['upgrades'] > 0))
         checks.append(('C no suspects remain', rep['suspect_count'] == 0))
         checks.append(('C overlap counted', rep['overlaps'] == [('disk_001.raw', len(seq3))]))
+
+    # scenario D: test missing_lba_ranges with a mix of covered,
+    # headskipped, read-failed, and truly missing sectors.
+    total_d = 2000
+    seq4 = good(100, 400)        # 100..399 covered
+    seq4[50] = (150, ST_HEADSKIP)  # 150 headskipped
+    seq4[100] = (300, 0x04)      # 300 read-failed
+    # lba 0..99 never attempted, 400..1999 never attempted
+    with tempfile.TemporaryDirectory() as td:
+        write = lambda name, data: open(os.path.join(td, name), 'wb').write(data)
+        write('disk_000.raw', make_disk(seq4, total_d))
+        out = os.path.join(td, 'out.img')
+        rep = run_assembly(td, out, total_d, verbose=False)
+        truly_missing, missing_or_skipped = missing_lba_ranges(rep)
+
+        checks.append(('D truly_missing has gap at start',
+                       truly_missing[0] == (0, 99)))
+        checks.append(('D truly_missing has gap at end',
+                       truly_missing[-1] == (400, 1999)))
+        checks.append(('D truly_missing excludes headskipped',
+                       all(150 not in range(g0, g1 + 1)
+                           for g0, g1 in truly_missing)))
+        checks.append(('D truly_missing excludes read-failed',
+                       all(300 not in range(g0, g1 + 1)
+                           for g0, g1 in truly_missing)))
+        checks.append(('D missing_or_skipped includes headskipped',
+                       any(150 in range(g0, g1 + 1)
+                           for g0, g1 in missing_or_skipped)))
+        checks.append(('D missing_or_skipped excludes read-failed',
+                       all(300 not in range(g0, g1 + 1)
+                           for g0, g1 in missing_or_skipped)))
 
     print()
     failed = False

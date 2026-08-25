@@ -195,6 +195,60 @@ def write_report(path, rep, dumps_dir):
         f.write('\n'.join(lines) + '\n')
 
 
+def missing_lba_ranges(rep):
+    """Compute two lists of (start, end) LBA ranges from an assembly report.
+
+    truly_missing:   LBAs with no data, no error log, not headskipped.
+                     (these are the 'gaps' in the report)
+    missing_or_skipped: same, plus LBAs that were headskipped.
+    """
+    truly_missing = rep['gaps']
+
+    problem = set(rep['headskipped_lbas'])
+    for g0, g1 in truly_missing:
+        for lba in range(g0, g1 + 1):
+            problem.add(lba)
+
+    missing_or_skipped = []
+    run_start = None
+    prev = -2
+    for lba in sorted(problem):
+        if lba == prev + 1:
+            prev = lba
+        else:
+            if run_start is not None:
+                missing_or_skipped.append((run_start, prev))
+            run_start = lba
+            prev = lba
+    if run_start is not None:
+        missing_or_skipped.append((run_start, prev))
+
+    return truly_missing, missing_or_skipped
+
+
+def cmd_missing(args):
+    total = args.cyls * args.heads * args.spt
+    rep = run_assembly(args.dumps, os.devnull, total, verbose=False)
+    truly_missing, missing_or_skipped = missing_lba_ranges(rep)
+
+    print('=== truly missing (never attempted) ===')
+    if truly_missing:
+        for g0, g1 in truly_missing:
+            print('  %d..%d  (%d sectors, %.2f MB)'
+                  % (g0, g1, g1 - g0 + 1, (g1 - g0 + 1) * SECTOR / 1048576.0))
+    else:
+        print('  none')
+
+    print('')
+    print('=== missing or headskipped ===')
+    if missing_or_skipped:
+        for g0, g1 in missing_or_skipped:
+            print('  %d..%d  (%d sectors, %.2f MB)'
+                  % (g0, g1, g1 - g0 + 1, (g1 - g0 + 1) * SECTOR / 1048576.0))
+    else:
+        print('  none')
+
+
 def print_assembly_summary(rep, out_path, report_path):
     print('Disks used   : %d (%d files rejected)'
           % (len(rep['chosen_files']), len(rep['rejected'])))
