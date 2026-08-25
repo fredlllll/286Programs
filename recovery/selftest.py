@@ -9,7 +9,7 @@ import tempfile
 from structures import (ST_OK, ST_HEADSKIP, has_data,
                         Descriptor, DescriptorBlock)
 from format import (SECTOR, DISK_BYTES, DESC_PER_BLOCK, ENTRY_SIZE,
-                    crc16)
+                    MAGIC, crc16, _crc8)
 from assemble import run_assembly, missing_lba_ranges
 
 
@@ -47,7 +47,12 @@ def make_disk(seq: list[Descriptor], total: int,
             if has_data(desc.status):
                 block[off + 4] = len(datas)
                 datas.append(fake_sector(desc.lba))
-        struct.pack_into('<H', block, 506, crc16(bytes(block[0:506])))
+            block[off + 5] = _crc8(bytes(block[off:off + 5]))
+        hdr_off = 1 + DESC_PER_BLOCK * ENTRY_SIZE
+        block[hdr_off:hdr_off + 5] = MAGIC
+        # crc covers data sectors, not the descriptor block
+        data_blob = b''.join(datas)
+        struct.pack_into('<H', block, 510, crc16(data_blob) if data_blob else 0)
         if gi == corrupt_group:
             block[corrupt_byte] ^= 0xFF
         img[pos:pos + SECTOR] = block
@@ -78,7 +83,7 @@ def cmd_selftest(args: argparse.Namespace) -> None:
     seq0[1500] = Descriptor(1500, ST_HEADSKIP, 0)  # head masked
     with tempfile.TemporaryDirectory() as td:
         _write_file(td, 'disk_000.raw',
-                    make_disk(seq0, total_a, corrupt_group=1, corrupt_byte=400))
+                    make_disk(seq0, total_a, corrupt_group=1, corrupt_byte=510))
         out = os.path.join(td, 'out.img')
         rep = run_assembly(td, out, total_a, verbose=False)
         data = open(out, 'rb').read()
@@ -121,7 +126,7 @@ def cmd_selftest(args: argparse.Namespace) -> None:
     seq3 = good_range(500, 1500)
     with tempfile.TemporaryDirectory() as td:
         _write_file(td, 'disk_000.raw',
-                    make_disk(seq3, total_c, corrupt_group=0, corrupt_byte=200))
+                    make_disk(seq3, total_c, corrupt_group=0, corrupt_byte=511))
         _write_file(td, 'disk_001.raw', make_disk(seq3, total_c))
         out = os.path.join(td, 'out.img')
         rep = run_assembly(td, out, total_c, verbose=False)

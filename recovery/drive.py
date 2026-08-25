@@ -8,7 +8,7 @@ import time
 
 from structures import has_data, ST_HEADSKIP
 from format import (DISK_BYTES, SECTOR, DESC_PER_BLOCK, ENTRY_SIZE,
-                    crc16, evaluate_image, iter_blocks)
+                    MAGIC, crc16, evaluate_image, iter_blocks)
 from windrive import WinDrive
 
 RETRY_SECTORS: int = 4
@@ -16,7 +16,10 @@ RETRY_SECTORS: int = 4
 
 def _retry_bad_crc_blocks(drv: WinDrive, buf: bytearray,
                           img: bytes) -> int:
-    """Re-read sectors whose descriptor block CRC failed. Returns retry count."""
+    """Re-read sectors whose descriptor block has bad magic or count.
+    The block-level CRC covers data sectors, not the descriptor block,
+    so we check magic+count as a proxy for descriptor block integrity.
+    Returns retry count."""
     retries = 0
     pos = 0
     while pos + SECTOR <= DISK_BYTES:
@@ -26,21 +29,23 @@ def _retry_bad_crc_blocks(drv: WinDrive, buf: bytearray,
         count = block[0]
         if count > DESC_PER_BLOCK:
             break
-        crc_ok = struct.unpack_from('<H', block, 506)[0] \
-            == crc16(bytes(block[0:506]))
-        if not crc_ok:
+        magic = bytes(block[1 + DESC_PER_BLOCK * ENTRY_SIZE:
+                            1 + DESC_PER_BLOCK * ENTRY_SIZE + 5])
+        block_ok = (magic == MAGIC and count <= DESC_PER_BLOCK)
+        if not block_ok:
             for _attempt in range(RETRY_SECTORS):
                 retries += 1
                 data = drv.read_sector(pos)
                 if data is not None:
                     buf[pos:pos + SECTOR] = data
                     block_new = bytes(buf[pos:pos + SECTOR])
-                    crc_ok_new = struct.unpack_from('<H', block_new, 506)[0] \
-                        == crc16(bytes(block_new[0:506]))
-                    if crc_ok_new:
+                    count_new = block_new[0]
+                    magic_new = bytes(block_new[1 + DESC_PER_BLOCK * ENTRY_SIZE:
+                                                 1 + DESC_PER_BLOCK * ENTRY_SIZE + 5])
+                    if magic_new == MAGIC and count_new <= DESC_PER_BLOCK:
                         img = bytes(buf)
                         block = block_new
-                        count = block_new[0]
+                        count = count_new
                         break
         ngood = sum(1 for i in range(count)
                     if has_data(block[1 + i * ENTRY_SIZE + 3]))

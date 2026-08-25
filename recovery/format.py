@@ -1,10 +1,10 @@
-"""On-disk format constants and parsing for the headerless v4 floppy layout.
+"""On-disk format constants and parsing for the headerless v5 floppy layout.
 
 Floppy layout (see watcomc/source/program.c):
   LBA 0..     repeating groups, one per hdd track batch:
-                 [descriptor block: count byte + up to 101 entries of
-                  lba(3 bytes le) + int13 status(1) + dataIdx(1),
-                   padded, crc16 over bytes 0..505]
+                 [descriptor block: count(1) + up to 84 entries of
+                  lba(3) + status(1) + dataIdx(1) + crc8(1),
+                  magic(5:"HDSAV"), crc16 over the following data sectors]
                  [the 512-byte data sectors whose status says data follows]
 
 No third party dependencies, stdlib only.
@@ -19,8 +19,9 @@ from structures import (ST_OK, ST_ECC, ST_HEADSKIP, has_data,
 SECTOR: int = 512
 DISK_BYTES: int = 2880 * SECTOR
 
-DESC_PER_BLOCK: int = 101       # 509 / sizeof(SectorDesc) on the 286
-ENTRY_SIZE: int = 5             # lba24 + status8 + dataIdx8
+DESC_PER_BLOCK: int = 84       # (509 - 4) / sizeof(SectorDesc) on the 286
+ENTRY_SIZE: int = 6            # lba24 + status8 + dataIdx8 + crc8
+MAGIC: bytes = b'HDSAV'
 
 
 INT13_ERRORS: dict[int, str] = {
@@ -60,12 +61,27 @@ def crc16(data: bytes, crc: int = 0xFFFF) -> int:
 # ---------------------------------------------------------------- groups
 
 
+def _crc8(data: bytes) -> int:
+    """CRC-8/CCITT, polynomial 0x07, init 0xff. mirrors the286 crc8()."""
+    crc = 0xFF
+    for b in data:
+        crc ^= b
+        for _ in range(8):
+            if crc & 0x80:
+                crc = ((crc << 1) ^ 0x07) & 0xFF
+            else:
+                crc = (crc << 1) & 0xFF
+    return crc
+
+
 def iter_blocks(image: bytes) -> Iterator[DescriptorBlock]:
     """Walk the descriptor blocks of a dump image.
 
-    Yields DescriptorBlock objects.  Stops at an all-zero block (the
-    zero fill after the last group) or at a block whose crc/count is
-    broken - everything behind such a block is uninterpretable anyway.
+    Yields DescriptorBlock objects. Stops at an all-zero block (the
+    zero fill after the last group), at a block with bad magic, or at
+    a block whose count is corrupt. The block-level crc covers the
+    data sectors that follow the descriptor block, not the descriptor
+    block itself (individual descriptors carry their own crc8).
     """
     pos = 0
     while pos + SECTOR <= DISK_BYTES:
@@ -75,13 +91,17 @@ def iter_blocks(image: bytes) -> Iterator[DescriptorBlock]:
         count = block[0]
         if count > DESC_PER_BLOCK:
             break                                   # corrupt, cannot trust
-        crc_ok = struct.unpack_from('<H', block, 506)[0] \
-            == crc16(bytes(block[0:506]))
+        magic = bytes(block[1 + DESC_PER_BLOCK * ENTRY_SIZE:
+                            1 + DESC_PER_BLOCK * ENTRY_SIZE + 5])
+        if magic != MAGIC:
+            break                                   # not a descriptor block
         entries: list[Descriptor] = []
         for i in range(count):
             off = 1 + i * ENTRY_SIZE
             lba = int.from_bytes(block[off:off + 3], 'little')
-            entries.append(Descriptor(lba, block[off + 3], block[off + 4]))
+            desc_crc8 = block[off + 5]
+            entries.append(Descriptor(lba, block[off + 3], block[off + 4],
+                                      desc_crc8))
         ngood = sum(1 for e in entries if has_data(e.status))
         datas: list[bytes] = []
         dpos = pos + SECTOR
@@ -90,6 +110,10 @@ def iter_blocks(image: bytes) -> Iterator[DescriptorBlock]:
                 break                               # truncated image
             datas.append(image[dpos:dpos + SECTOR])
             dpos += SECTOR
+        # crc covers the data sectors, not the descriptor block
+        data_blob = b''.join(datas)
+        crc_ok = struct.unpack_from('<H', block, 510)[0] \
+            == crc16(data_blob) if data_blob else True
         yield DescriptorBlock(entries=entries, datas=datas, crc_ok=crc_ok)
         pos += SECTOR * (1 + ngood)
 

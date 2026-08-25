@@ -113,3 +113,20 @@ uint32_t mul32_16(uint32_t multiplicand, uint16_t multiplier) {
     /* Combine the two 16-bit halves back into a 32-bit return value */
     return ((uint32_t)result_high << 16) | result_low;
 }
+
+uint8_t crc8(uint8_t *buf, uint8_t len){
+  uint8_t crc = 0xFF;
+  uint8_t i;
+  uint8_t j;
+  for(i = 0; i < len; i++){
+    crc ^= buf[i];
+    for(j = 0; j < 8; j++){
+      if(crc & 0x80){
+        crc = (uint8_t)((crc << 1) ^ 0x07);
+      }else{
+        crc <<= 1;
+      }
+    }
+  }
+  return crc;
+}

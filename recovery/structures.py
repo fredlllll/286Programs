@@ -27,10 +27,11 @@ def has_data(status: int) -> bool:
 
 @dataclass
 class Descriptor:
-    """One 5-byte entry in a descriptor block (lba + status + data index)."""
+    """One 6-byte entry in a descriptor block (lba + status + data index + crc8)."""
     lba: int
     status: int
     data_idx: int
+    crc8: int = 0
 
 
 @dataclass

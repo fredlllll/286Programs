@@ -128,11 +128,18 @@ static struct Sector __far *dataSlot(uint8_t idx)
 #define DATAIDXNOTWRITTEN 255
 /* ---- one sector descriptor: the ID card of a single hdd sector ----
 
-   5 bytes each. lba is 24 bits (8 gb ceiling at 512 b/sector, far
+   6 bytes each. lba is 24 bits (8 gb ceiling at 512 b/sector, far
    past anything an mfm/rll controller can address). status is the
    int13 code from the read attempt (or HEADSKIPPED). dataIdx says
    which slot of the following data list holds this sector's 512
-   bytes; only meaningful when SECTOR_HAS_DATA(status) */
+   bytes; only meaningful when SECTOR_HAS_DATA(status). crc8 covers
+   the first 5 bytes (lba + status + dataIdx) */
+
+#define DESC_MAGIC0 'H'
+#define DESC_MAGIC1 'D'
+#define DESC_MAGIC2 'S'
+#define DESC_MAGIC3 'A'
+#define DESC_MAGIC4 'V'
 
 #pragma pack(push, 1)
 struct SectorDesc
@@ -140,20 +147,25 @@ struct SectorDesc
     uint8_t lba[3];  /* hdd lba, little endian                  */
     uint8_t status;  /* int13 code, see SECTOR_STATUS_*         */
     uint8_t dataIdx; /* index into the group's data list        */
+    uint8_t crc8;    /* crc8 over lba+status+dataIdx            */
 };
 #pragma pack(pop)
 
 /* ---- one descriptor block: describes one whole track batch ----
 
-   physically written BEFORE the data it talks about, so the restorer
-   can stream through the disk in one pass. count tells how many of
-   the DESC_PER_BLOCK slots are real; unused tail slots are zeroed at
-   flush time so every block emits deterministic bytes. the crc covers
-   count + all descriptor slots (the first 1 + DESC_PER_BLOCK*5 bytes,
-   including the zeroed tail) so a damaged block is detected as a
-   unit. crc and pad themselves are excluded from the coverage */
+   physically written AFTER the data it talks about, so the crc can
+   cover the data sectors. count tells how many of the DESC_PER_BLOCK
+   slots are real; unused tail slots are zeroed at flush time so every
+   block emits deterministic bytes. each descriptor carries its own crc8
+   so a partially written entry is caught. the header contains a
+   five-byte magic ("HDSAV") so the python reader can positively
+   identify descriptor blocks. the block crc (bytes 510..511) covers
+   the data sectors that follow the descriptor block, not the
+   descriptor block itself */
 
-#define DESC_PER_BLOCK (509 / sizeof(struct SectorDesc))
+#define DESC_PER_BLOCK ((uint8_t)(509 / sizeof(struct SectorDesc)))
+/* 509 / 6 = 84 descriptors. 84*6 = 504, +1 count, +5 magic, +2 crc
+   = 512 exactly */
 
 uint16_t currentDescriptorHeaderFloppyLba = 0;
 
@@ -162,8 +174,8 @@ struct DescBlock
 {
     uint8_t count;                                                         /* entries used           */
     struct SectorDesc desc[DESC_PER_BLOCK];                                /* the descriptors        */
-    uint16_t crc;                                                          /* crc over desc  */
-    uint8_t pad[512 - 1 - 2 - sizeof(struct SectorDesc) * DESC_PER_BLOCK]; /* zeros              */
+    uint8_t magic[5];                                                      /* "HDSAV"                */
+    uint16_t crc;                                                          /* crc over data sectors  */
 } currentDescriptorHeader;
 #pragma pack(pop)
 
@@ -175,7 +187,6 @@ void writeOutBufferedData(void)
 {
     uint8_t i;
     struct SectorDesc zeroed = {0};
-    uint16_t crcCoverage = (uint16_t)(1 + DESC_PER_BLOCK * sizeof(struct SectorDesc));
     uint8_t neededSectors = 1;
     for (i = 0; i < currentDescriptorHeader.count; i++)
     {
@@ -185,13 +196,23 @@ void writeOutBufferedData(void)
         }
     }
 
-    /* stale descriptors from earlier blocks must not leak into this
-       one: zero the tail, then stamp the crc over the clean block */
+    /* stamp header: magic, then zero unused descriptor slots */
+    currentDescriptorHeader.magic[0] = DESC_MAGIC0;
+    currentDescriptorHeader.magic[1] = DESC_MAGIC1;
+    currentDescriptorHeader.magic[2] = DESC_MAGIC2;
+    currentDescriptorHeader.magic[3] = DESC_MAGIC3;
+    currentDescriptorHeader.magic[4] = DESC_MAGIC4;
     for (i = currentDescriptorHeader.count; i < DESC_PER_BLOCK; i++)
     {
         currentDescriptorHeader.desc[i] = zeroed;
     }
-    currentDescriptorHeader.crc = crcBuf(0xFFFF, (uint8_t *)&currentDescriptorHeader, crcCoverage);
+
+    /* per-descriptor crc8: covers lba(3) + status + dataIdx = 5 bytes */
+    for (i = 0; i < currentDescriptorHeader.count; i++)
+    {
+        currentDescriptorHeader.desc[i].crc8 =
+            crc8(currentDescriptorHeader.desc[i].lba, 5);
+    }
 
     if (FLOPPY_TOTAL_SECTORS - floppyPosition.lba < neededSectors)
     {
@@ -207,15 +228,27 @@ void writeOutBufferedData(void)
 
     while (1)
     {
-        uint8_t ok = writeVerified(&currentDescriptorHeader);
+        uint8_t ok = 1;
+        uint16_t dataCrc = 0xFFFF;
+        uint8_t dataSectors = 0;
+
+        /* write data sectors first */
         for (i = 0; i < currentDescriptorHeader.count; ++i)
         {
             uint8_t dataIdx = currentDescriptorHeader.desc[i].dataIdx;
             if (dataIdx != DATAIDXNOTWRITTEN)
             {
                 ok &= writeVerified(dataSlot(dataIdx));
+                dataCrc = crcBuf(dataCrc, (uint8_t __far *)dataSlot(dataIdx), 512);
+                dataSectors++;
             }
         }
+
+        /* crc covers the data sectors that follow the descriptor block */
+        currentDescriptorHeader.crc = dataCrc;
+
+        /* write descriptor block last, now with correct crc */
+        ok &= writeVerified(&currentDescriptorHeader);
         if (ok)
         {
             break;

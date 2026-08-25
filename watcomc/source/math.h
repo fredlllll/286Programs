@@ -20,4 +20,8 @@ uint16_t div32_16(uint32_t dividend, uint16_t divisor, uint16_t *rem);
  */
 uint32_t mul32_16(uint32_t multiplicand, uint16_t multiplier);
 
+/* crc-8/ccitt over a short buffer. polynomial 0x07, init 0xff.
+   used for per-descriptor integrity checking */
+uint8_t crc8(uint8_t *buf, uint8_t len);
+
 #endif
