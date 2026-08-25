@@ -1,6 +1,6 @@
 """SVG bad-sector map generator."""
 
-from format import has_data
+from format import has_data, ST_HEADSKIP
 from assemble import load_dumps
 
 MAP_COLORS = {
@@ -30,7 +30,7 @@ def build_badmap_state(dumps_dir, cyls, heads, spt):
                     continue
                 if has_data(st):
                     state[lba] = 1
-                elif st == 0xFE:
+                elif st == ST_HEADSKIP:
                     if state[lba] == 0:
                         state[lba] = 3
                 else:

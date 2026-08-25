@@ -14,6 +14,11 @@ def fake_sector(lba):
     return bytes(((lba * 7 + j * 13 + (j >> 4)) & 0xFF) for j in range(SECTOR))
 
 
+def good_range(lo, hi):
+    """Produce (lba, ST_OK) pairs for every lba in [lo, hi)."""
+    return [(l, ST_OK) for l in range(lo, hi)]
+
+
 def make_disk(seq, total, corrupt_group=None, corrupt_byte=None):
     """Build a 1.44MB image exactly like the 286 tool writes it.
 
@@ -48,12 +53,14 @@ def make_disk(seq, total, corrupt_group=None, corrupt_byte=None):
     return bytes(img)
 
 
+def _write_file(directory, name, data):
+    with open(os.path.join(directory, name), 'wb') as f:
+        f.write(data)
+
+
 def cmd_selftest(args):
     """Synthetic round-trip: generate disks like the 286 would write them,
     then check that run_assembly reconstructs and reports correctly."""
-
-    good = lambda lo, hi: [(l, ST_OK) for l in range(lo, hi)]
-
     checks = []
 
     # scenario A: ONE disk covers a whole (small) drive, with one dead
@@ -61,13 +68,12 @@ def cmd_selftest(args):
     # head-masked sector (lba 1500) and one corrupted descriptor block.
     # none of those are gaps: every lba is accounted for -> COMPLETE.
     total_a = 2000
-    seq0 = good(0, total_a)
+    seq0 = good_range(0, total_a)
     seq0[5] = (5, 0x04)                       # sector not found
     seq0[1500] = (1500, ST_HEADSKIP)          # head masked this pass
     with tempfile.TemporaryDirectory() as td:
-        write = lambda name, data: open(os.path.join(td, name), 'wb').write(data)
-        write('disk_000.raw', make_disk(seq0, total_a,
-                                        corrupt_group=1, corrupt_byte=400))
+        _write_file(td, 'disk_000.raw',
+                    make_disk(seq0, total_a, corrupt_group=1, corrupt_byte=400))
         out = os.path.join(td, 'out.img')
         rep = run_assembly(td, out, total_a, verbose=False)
         data = open(out, 'rb').read()
@@ -94,8 +100,8 @@ def cmd_selftest(args):
     # scenario B: only first half of the drive dumped -> the uncovered
     # tail must be reported as a gap and the status must be INCOMPLETE.
     with tempfile.TemporaryDirectory() as td:
-        write = lambda name, data: open(os.path.join(td, name), 'wb').write(data)
-        write('disk_000.raw', make_disk(good(0, 2000), 3000))
+        _write_file(td, 'disk_000.raw',
+                    make_disk(good_range(0, 2000), 3000))
         out = os.path.join(td, 'out.img')
         rep = run_assembly(td, out, 3000, verbose=False)
         checks.append(('B tail reported as gap',
@@ -107,29 +113,28 @@ def cmd_selftest(args):
     # block (data lands as suspect), then cleanly. the clean dump must
     # upgrade every suspect sector.
     total_c = 2000
-    seq3 = good(500, 1500)
+    seq3 = good_range(500, 1500)
     with tempfile.TemporaryDirectory() as td:
-        write = lambda name, data: open(os.path.join(td, name), 'wb').write(data)
-        write('disk_000.raw', make_disk(seq3, total_c,
-                                        corrupt_group=0, corrupt_byte=200))
-        write('disk_001.raw', make_disk(seq3, total_c))
+        _write_file(td, 'disk_000.raw',
+                    make_disk(seq3, total_c, corrupt_group=0, corrupt_byte=200))
+        _write_file(td, 'disk_001.raw', make_disk(seq3, total_c))
         out = os.path.join(td, 'out.img')
         rep = run_assembly(td, out, total_c, verbose=False)
 
         checks.append(('C upgrade happened', rep['upgrades'] > 0))
         checks.append(('C no suspects remain', rep['suspect_count'] == 0))
-        checks.append(('C overlap counted', rep['overlaps'] == [('disk_001.raw', len(seq3))]))
+        checks.append(('C overlap counted',
+                       rep['overlaps'] == [('disk_001.raw', len(seq3))]))
 
     # scenario D: test missing_lba_ranges with a mix of covered,
     # headskipped, read-failed, and truly missing sectors.
     total_d = 2000
-    seq4 = good(100, 400)        # 100..399 covered
-    seq4[50] = (150, ST_HEADSKIP)  # 150 headskipped
-    seq4[100] = (300, 0x04)      # 300 read-failed
+    seq4 = good_range(100, 400)        # 100..399 covered
+    seq4[50] = (150, ST_HEADSKIP)      # 150 headskipped
+    seq4[100] = (300, 0x04)            # 300 read-failed
     # lba 0..99 never attempted, 400..1999 never attempted
     with tempfile.TemporaryDirectory() as td:
-        write = lambda name, data: open(os.path.join(td, name), 'wb').write(data)
-        write('disk_000.raw', make_disk(seq4, total_d))
+        _write_file(td, 'disk_000.raw', make_disk(seq4, total_d))
         out = os.path.join(td, 'out.img')
         rep = run_assembly(td, out, total_d, verbose=False)
         truly_missing, missing_or_skipped = missing_lba_ranges(rep)

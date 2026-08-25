@@ -131,8 +131,7 @@ def write_report(path, rep, dumps_dir):
     ap('drive size: %d sectors (%.2f MB)' % (rep['total'], rep['total'] * SECTOR / 1048576.0))
     ap('')
     ap('=== disks used ===')
-    ap('%-24s %-9s %-9s %-7s' %
-       ('file', 'lbas', 'data', 'blocks'))
+    ap('%-24s %-9s %-9s %-7s' % ('file', 'lbas', 'data', 'blocks'))
     for rec in rep['chosen_records']:
         ap('%-24s %-9d %-9d %-7d' % (
             rec['file'], rec['ev']['desc_total'], rec['ev']['data_total'],
@@ -163,19 +162,14 @@ def write_report(path, rep, dumps_dir):
         ap('')
         ap('=== read failures by code ===')
         by_code = {}
-        for lba in sorted(rep['err_codes']):
-            by_code.setdefault(rep['err_codes'][lba], []).append(lba)
+        for lba, code in sorted(rep['err_codes'].items()):
+            by_code.setdefault(code, []).append(lba)
         for code in sorted(by_code):
             lbas = by_code[code]
             ap('  0x%02x %-22s : %d sectors' % (
                 code, status_name(code), len(lbas)))
-            line = '    '
-            for b in lbas:
-                line += ' %d' % b
-                if len(line) > 74:
-                    ap(line)
-                    line = '    '
-            if line.strip():
+            wrapped = _wrap_integers(lbas, indent=4, width=74)
+            for line in wrapped:
                 ap(line)
     if rep['gaps']:
         ap('')
@@ -193,6 +187,22 @@ def write_report(path, rep, dumps_dir):
                       'INCOMPLETE - missing ranges'))
     with open(path, 'w') as f:
         f.write('\n'.join(lines) + '\n')
+
+
+def _wrap_integers(values, indent, width):
+    """Format a list of integers into lines that stay under 'width' chars."""
+    prefix = ' ' * indent
+    lines = []
+    line = prefix
+    for v in values:
+        candidate = line + ' %d' % v
+        if len(candidate) > width and line != prefix:
+            lines.append(line)
+            line = prefix
+        line += ' %d' % v
+    if line.strip():
+        lines.append(line)
+    return lines
 
 
 def missing_lba_ranges(rep):

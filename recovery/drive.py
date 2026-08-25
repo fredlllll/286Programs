@@ -1,21 +1,20 @@
 """Raw floppy drive access and the read command."""
 
+import ctypes
 import os
 import struct
 import sys
 import time
+from ctypes import wintypes
 
 from format import (DISK_BYTES, SECTOR, DESC_PER_BLOCK, ENTRY_SIZE,
-                    has_data, ST_HEADSKIP, crc16, evaluate_image)
+                    has_data, ST_HEADSKIP, crc16, evaluate_image, iter_groups)
 
 RETRY_SECTORS = 4
 
 
 def _open_drive(letter):
     """Open a physical drive for raw access. Returns handle."""
-    import ctypes
-    from ctypes import wintypes
-
     k32 = ctypes.WinDLL('kernel32', use_last_error=True)
     k32.CreateFileW.restype = wintypes.HANDLE
     k32.CreateFileW.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD,
@@ -42,9 +41,6 @@ def _open_drive(letter):
 
 def _read_sector(k32, handle, byte_offset, buf):
     """Read one 512-byte sector from byte_offset into buf. Returns True on success."""
-    import ctypes
-    from ctypes import wintypes
-
     k32.SetFilePointer(handle, byte_offset, None, 0)
     rb = ctypes.create_string_buffer(SECTOR)
     got = wintypes.DWORD(0)
@@ -54,15 +50,43 @@ def _read_sector(k32, handle, byte_offset, buf):
     return False
 
 
+def _retry_bad_crc_blocks(k32, handle, buf, img):
+    """Re-read sectors whose descriptor block CRC failed. Returns retry count."""
+    retries = 0
+    pos = 0
+    while pos + SECTOR <= DISK_BYTES:
+        block = img[pos:pos + SECTOR]
+        if not any(block):
+            break
+        count = block[0]
+        if count > DESC_PER_BLOCK:
+            break
+        crc_ok = struct.unpack_from('<H', block, 506)[0] \
+            == crc16(bytes(block[0:506]))
+        if not crc_ok:
+            for attempt in range(RETRY_SECTORS):
+                retries += 1
+                if _read_sector(k32, handle, pos, buf):
+                    block_new = bytes(buf[pos:pos + SECTOR])
+                    crc_ok_new = struct.unpack_from('<H', block_new, 506)[0] \
+                        == crc16(bytes(block_new[0:506]))
+                    if crc_ok_new:
+                        img = bytes(buf)
+                        block = block_new
+                        count = block_new[0]
+                        break
+        ngood = sum(1 for i in range(count)
+                    if has_data(block[1 + i * ENTRY_SIZE + 3]))
+        pos += SECTOR * (1 + ngood)
+    return retries
+
+
 def read_drive(letter, expect_bytes=DISK_BYTES):
     r"""Read a whole floppy from \\.\X:. Returns (data, error_regions).
 
     After the initial bulk read, every descriptor block whose CRC
     fails is re-read sector by sector (up to RETRY_SECTORS times)
     to recover from soft read errors."""
-    import ctypes
-    from ctypes import wintypes
-
     k32, handle = _open_drive(letter)
 
     buf = bytearray(expect_bytes)
@@ -107,38 +131,11 @@ def read_drive(letter, expect_bytes=DISK_BYTES):
         print('\rbulk read done, checking CRCs...              ', end='',
               flush=True)
 
-        # re-read sectors whose descriptor block CRC failed
-        retries = 0
-        img = bytes(buf)
-        pos = 0
-        while pos + SECTOR <= DISK_BYTES:
-            block = img[pos:pos + SECTOR]
-            if not any(block):
-                break
-            count = block[0]
-            if count > DESC_PER_BLOCK:
-                break
-            crc_ok = struct.unpack_from('<H', block, 506)[0] \
-                == crc16(bytes(block[0:506]))
-            if not crc_ok:
-                for attempt in range(RETRY_SECTORS):
-                    retries += 1
-                    if _read_sector(k32, handle, pos, buf):
-                        block_new = bytes(buf[pos:pos + SECTOR])
-                        crc_ok_new = struct.unpack_from('<H', block_new, 506)[0] \
-                            == crc16(bytes(block_new[0:506]))
-                        if crc_ok_new:
-                            img = bytes(buf)
-                            block = block_new
-                            count = block_new[0]
-                            break
-            ngood = sum(1 for i in range(count)
-                        if has_data(block[1 + i * ENTRY_SIZE + 3]))
-            pos += SECTOR * (1 + ngood)
+        retries = _retry_bad_crc_blocks(k32, handle, buf, bytes(buf))
+        bad_crcs = sum(1 for g in iter_groups(bytes(buf)) if not g['crc_ok'])
         if retries:
             print('\rretried %d sector(s), %d CRC error(s) remaining   '
-                  % (retries, sum(1 for g in _iter_blocks(bytes(buf))
-                                  if not g)), flush=True)
+                  % (retries, bad_crcs), flush=True)
         else:
             print('\rno CRC errors - disk is clean                     ',
                   flush=True)
@@ -146,24 +143,6 @@ def read_drive(letter, expect_bytes=DISK_BYTES):
         k32.CloseHandle(handle)
     return bytes(buf), errors
 
-
-def _iter_blocks(image):
-    """Yield (offset, crc_ok) for each descriptor block."""
-    import struct
-    pos = 0
-    while pos + SECTOR <= DISK_BYTES:
-        block = image[pos:pos + SECTOR]
-        if not any(block):
-            break
-        count = block[0]
-        if count > DESC_PER_BLOCK:
-            break
-        crc_ok = struct.unpack_from('<H', block, 506)[0] \
-            == crc16(bytes(block[0:506]))
-        yield crc_ok
-        ngood = sum(1 for i in range(count)
-                    if has_data(block[1 + i * ENTRY_SIZE + 3]))
-        pos += SECTOR * (1 + ngood)
 
 # ---------------------------------------------------------------- read cmd
 
