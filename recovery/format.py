@@ -13,28 +13,14 @@ No third party dependencies, stdlib only.
 import struct
 from collections.abc import Iterator
 
+from structures import (ST_OK, ST_ECC, ST_HEADSKIP, has_data,
+                        Descriptor, DescriptorBlock, FloppyEval)
+
 SECTOR: int = 512
 DISK_BYTES: int = 2880 * SECTOR
 
 DESC_PER_BLOCK: int = 101       # 509 / sizeof(SectorDesc) on the 286
 ENTRY_SIZE: int = 5             # lba24 + status8 + dataIdx8
-
-ST_OK: int = 0x00               # read clean, data present
-ST_ECC: int = 0x11              # read after ecc correction, data present
-ST_HEADSKIP: int = 0xFE         # head masked out this pass, never attempted
-
-# group dict keys: first_lba (int), entries (list[tuple[int,int,int]]),
-#                  datas (list[bytes]), crc_ok (bool)
-GroupDict = dict
-
-# evaluate_image result dict: ok (bool), reason (str), groups (list[GroupDict]),
-#                             desc_total (int), data_total (int), blocks_bad (int)
-EvalDict = dict
-
-
-def has_data(status: int) -> bool:
-    """True when the descriptor's sector carries real data."""
-    return status in (ST_OK, ST_ECC)
 
 
 INT13_ERRORS: dict[int, str] = {
@@ -74,17 +60,12 @@ def crc16(data: bytes, crc: int = 0xFFFF) -> int:
 # ---------------------------------------------------------------- groups
 
 
-def iter_groups(image: bytes) -> Iterator[GroupDict]:
-    """Walk the descriptor groups of a dump image.
+def iter_blocks(image: bytes) -> Iterator[DescriptorBlock]:
+    """Walk the descriptor blocks of a dump image.
 
-    Yields dicts:
-      first_lba   hdd lba of the group's first descriptor
-      entries     list of (lba, status, data_idx)
-      datas       list of 512-byte data sectors (index == dataIdx)
-      crc_ok      block crc check result
-    Stops at an all-zero block (the zero fill after the last group) or
-    at a block whose crc/count is broken - everything behind such a
-    block is uninterpretable anyway.
+    Yields DescriptorBlock objects.  Stops at an all-zero block (the
+    zero fill after the last group) or at a block whose crc/count is
+    broken - everything behind such a block is uninterpretable anyway.
     """
     pos = 0
     while pos + SECTOR <= DISK_BYTES:
@@ -96,12 +77,12 @@ def iter_groups(image: bytes) -> Iterator[GroupDict]:
             break                                   # corrupt, cannot trust
         crc_ok = struct.unpack_from('<H', block, 506)[0] \
             == crc16(bytes(block[0:506]))
-        entries: list[tuple[int, int, int]] = []
+        entries: list[Descriptor] = []
         for i in range(count):
             off = 1 + i * ENTRY_SIZE
             lba = int.from_bytes(block[off:off + 3], 'little')
-            entries.append((lba, block[off + 3], block[off + 4]))
-        ngood = sum(1 for _, st, _ in entries if has_data(st))
+            entries.append(Descriptor(lba, block[off + 3], block[off + 4]))
+        ngood = sum(1 for e in entries if has_data(e.status))
         datas: list[bytes] = []
         dpos = pos + SECTOR
         for _k in range(ngood):
@@ -109,43 +90,35 @@ def iter_groups(image: bytes) -> Iterator[GroupDict]:
                 break                               # truncated image
             datas.append(image[dpos:dpos + SECTOR])
             dpos += SECTOR
-        yield {
-            'first_lba': entries[0][0] if entries else 0,
-            'entries': entries,
-            'datas': datas,
-            'crc_ok': crc_ok,
-        }
+        yield DescriptorBlock(entries=entries, datas=datas, crc_ok=crc_ok)
         pos += SECTOR * (1 + ngood)
 
 
-def evaluate_image(image: bytes) -> EvalDict:
+def evaluate_image(image: bytes) -> FloppyEval:
     """Validation of one 1.44MB dump (headerless format).
 
-    Returns dict:
+    Returns FloppyEval with:
       ok           group stream consistent (safe to place)
       reason       why not ok
-      groups       list from iter_groups()
+      blocks       list of DescriptorBlock from iter_blocks()
       desc_total   descriptors actually found
       data_total   data sectors actually found
       blocks_bad   number of descriptor blocks failing their crc
     """
-    res: EvalDict = {'ok': False, 'reason': '', 'groups': [],
-                     'desc_total': 0, 'data_total': 0, 'blocks_bad': 0}
     if len(image) != DISK_BYTES:
-        res['reason'] = 'unexpected size %d (want %d)' % (len(image), DISK_BYTES)
-        return res
+        return FloppyEval(reason='unexpected size %d (want %d)' % (len(image), DISK_BYTES))
 
-    groups = list(iter_groups(image))
-    if not groups:
-        res['reason'] = 'no descriptor groups found (blank disk?)'
-        return res
-    res['groups'] = groups
-    res['desc_total'] = sum(len(g['entries']) for g in groups)
-    res['data_total'] = sum(len(g['datas']) for g in groups)
-    res['blocks_bad'] = sum(1 for g in groups if not g['crc_ok'])
-    for g in groups:
-        if len(g['datas']) < sum(1 for _, st, _ in g['entries'] if has_data(st)):
-            res['reason'] = 'group at lba %d truncated' % g['first_lba']
-            return res
-    res['ok'] = True
-    return res
+    blocks = list(iter_blocks(image))
+    if not blocks:
+        return FloppyEval(reason='no descriptor groups found (blank disk?)')
+
+    desc_total = sum(len(b.entries) for b in blocks)
+    data_total = sum(len(b.datas) for b in blocks)
+    blocks_bad = sum(1 for b in blocks if not b.crc_ok)
+
+    for b in blocks:
+        if len(b.datas) < sum(1 for e in b.entries if has_data(e.status)):
+            return FloppyEval(reason='group at lba %d truncated' % b.first_lba)
+
+    return FloppyEval(ok=True, blocks=blocks, desc_total=desc_total,
+                      data_total=data_total, blocks_bad=blocks_bad)

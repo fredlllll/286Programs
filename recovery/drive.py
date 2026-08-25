@@ -6,8 +6,9 @@ import struct
 import sys
 import time
 
+from structures import has_data, ST_HEADSKIP
 from format import (DISK_BYTES, SECTOR, DESC_PER_BLOCK, ENTRY_SIZE,
-                    has_data, ST_HEADSKIP, crc16, evaluate_image, iter_groups)
+                    crc16, evaluate_image, iter_blocks)
 from windrive import WinDrive
 
 RETRY_SECTORS: int = 4
@@ -89,7 +90,7 @@ def read_drive(letter: str, expect_bytes: int = DISK_BYTES) -> tuple[bytes, list
               flush=True)
 
         retries = _retry_bad_crc_blocks(drv, buf, bytes(buf))
-        bad_crcs = sum(1 for g in iter_groups(bytes(buf)) if not g['crc_ok'])
+        bad_crcs = sum(1 for b in iter_blocks(bytes(buf)) if not b.crc_ok)
         if retries:
             print('\rretried %d sector(s), %d CRC error(s) remaining   '
                   % (retries, bad_crcs), flush=True)
@@ -115,25 +116,25 @@ def read_one_disk(src: str, dumps_dir: str) -> None:
         sys.exit('--drive must be a letter (A..Z) or a path to an image file')
 
     ev = evaluate_image(image)
-    if ev['ok']:
-        err_n = sum(1 for g in ev['groups'] for _, st, _ in g['entries']
-                    if not has_data(st) and st != ST_HEADSKIP)
-        skip_n = sum(1 for g in ev['groups'] for _, st, _ in g['entries']
-                     if st == ST_HEADSKIP)
+    if ev.ok:
+        err_n = sum(1 for b in ev.blocks for e in b.entries
+                    if not has_data(e.status) and e.status != ST_HEADSKIP)
+        skip_n = sum(1 for b in ev.blocks for e in b.entries
+                     if e.status == ST_HEADSKIP)
         print('OK: %d descriptors, %d data sectors, '
               '%d read errors, %d head-skipped%s'
-              % (ev['desc_total'], ev['data_total'],
+              % (ev.desc_total, ev.data_total,
                  err_n, skip_n,
-                 ', %d BAD BLOCK(S)' % ev['blocks_bad'] if ev['blocks_bad'] else ''))
-        if ev['blocks_bad']:
+                 ', %d BAD BLOCK(S)' % ev.blocks_bad if ev.blocks_bad else ''))
+        if ev.blocks_bad:
             print('WARNING: %d descriptor block(s) fail their crc - affected '
-                  'data will be marked suspect.' % ev['blocks_bad'])
+                  'data will be marked suspect.' % ev.blocks_bad)
         if errors:
             print('NOTE: %d unreadable region(s) during raw read.' % len(errors))
         name = 'disk_%s' % time.strftime('%Y%m%d_%H%M%S')
     else:
         name = 'unknown_%s' % time.strftime('%Y%m%d_%H%M%S')
-        print('PROBLEM: %s' % ev['reason'])
+        print('PROBLEM: %s' % ev.reason)
         ans = input('Save anyway as %s? [y/N] ' % name).strip().lower()
         if not ans.startswith('y'):
             return

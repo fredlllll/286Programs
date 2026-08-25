@@ -6,111 +6,25 @@ import os
 import sys
 import time
 
-from format import (SECTOR, ST_HEADSKIP, has_data, status_name,
-                    evaluate_image, GroupDict, EvalDict)
+from structures import (has_data, ST_HEADSKIP, Descriptor, DescriptorBlock,
+                        FloppyEval, DumpRecord, Overlap, StitchReport)
+from format import (SECTOR, status_name, evaluate_image)
 
 
-def load_dumps(dumps_dir: str) -> tuple[list[dict], list[tuple[str, str]]]:
+def load_dumps(dumps_dir: str) -> tuple[list[DumpRecord], list[tuple[str, str]]]:
     """Load all .raw files from dumps_dir. Returns (records, rejected)."""
-    records: list[dict] = []
+    records: list[DumpRecord] = []
     rejected: list[tuple[str, str]] = []
     for fn in sorted(glob.glob(os.path.join(dumps_dir, '*.raw'))):
         with open(fn, 'rb') as f:
             image = f.read()
         ev = evaluate_image(image)
         base = os.path.basename(fn)
-        if not ev['ok']:
-            rejected.append((base, ev['reason']))
+        if not ev.ok:
+            rejected.append((base, ev.reason))
             continue
-        records.append({'file': base, 'ev': ev})
+        records.append(DumpRecord(file=base, ev=ev))
     return records, rejected
-
-
-def run_assembly(dumps_dir: str, out_path: str, total: int,
-                 verbose: bool = True) -> dict:
-    """Stitch all dumps into one image. Returns report dict.
-
-    Placement rules, per descriptor:
-      status has data  -> scatter its data sector to file offset lba*512
-      status HEADSKIP  -> leave the lba uncovered (awaiting another pass)
-      other status     -> leave uncovered, remember the error code
-    A dump whose descriptor block fails its crc still gets placed, but
-    every sector it provides is flagged suspect. Overlaps: first valid
-    placement wins; a suspect placement can be upgraded by a later
-    trustworthy one.
-    """
-    records, rejected = load_dumps(dumps_dir)
-    if not records:
-        sys.exit('No valid dump disks found in %s' % dumps_dir)
-
-    image_out = bytearray(total * SECTOR)
-    covered = bytearray(total)
-    suspect = bytearray(total)
-    err_codes: dict[int, int] = {}
-    headskipped_lbas: set[int] = set()
-    overlaps: list[tuple[str, int]] = []
-    upgrades_total = 0
-
-    for rec in records:
-        ov = 0
-        upgraded = 0
-        for g in rec['ev']['groups']:
-            trust = g['crc_ok']
-            for lba, st, didx in g['entries']:
-                if lba >= total:
-                    continue
-                if has_data(st):
-                    if didx < len(g['datas']):
-                        sec = g['datas'][didx]
-                        if covered[lba]:
-                            ov += 1
-                            if trust and suspect[lba]:
-                                suspect[lba] = 0
-                                image_out[lba * SECTOR:(lba + 1) * SECTOR] = sec
-                                upgraded += 1
-                            continue
-                        image_out[lba * SECTOR:(lba + 1) * SECTOR] = sec
-                    if covered[lba]:
-                        ov += 1
-                        continue
-                    covered[lba] = 1
-                    if not trust:
-                        suspect[lba] = 1
-                elif st == ST_HEADSKIP:
-                    headskipped_lbas.add(lba)
-                else:
-                    prev = err_codes.get(lba)
-                    if prev is None or st < prev:
-                        err_codes[lba] = st
-        if ov:
-            overlaps.append((rec['file'], ov))
-        upgrades_total += upgraded
-
-    gaps = _find_gaps(total, covered, err_codes, headskipped_lbas)
-    coverage = sum(covered)
-
-    with open(out_path, 'wb') as f:
-        f.write(image_out)
-
-    report: dict = {
-        'gaps': gaps,
-        'chosen_files': [r['file'] for r in records],
-        'err_codes': err_codes,
-        'headskipped_lbas': headskipped_lbas,
-        'suspect_count': sum(suspect),
-        'coverage': coverage,
-        'overlaps': overlaps,
-        'upgrades': upgrades_total,
-        'complete': not gaps,
-        'total': total,
-        'rejected': rejected,
-        'chosen_records': records,
-    }
-    report_path = os.path.splitext(out_path)[0] + '_report.txt'
-    write_report(report_path, report, dumps_dir)
-    if verbose:
-        print_assembly_summary(report, out_path, report_path)
-    return report
 
 
 def _find_gaps(total: int, covered: bytearray, err_codes: dict[int, int],
@@ -130,16 +44,103 @@ def _find_gaps(total: int, covered: bytearray, err_codes: dict[int, int],
     return gaps
 
 
-def missing_lba_ranges(rep: dict) -> tuple[list[tuple[int, int]], list[tuple[int, int]]]:
-    """Compute two lists of (start, end) LBA ranges from an assembly report.
+def run_assembly(dumps_dir: str, out_path: str, total: int,
+                 verbose: bool = True) -> StitchReport:
+    """Stitch all dumps into one image. Returns StitchReport.
+
+    Placement rules, per descriptor:
+      status has data  -> scatter its data sector to file offset lba*512
+      status HEADSKIP  -> leave the lba uncovered (awaiting another pass)
+      other status     -> leave uncovered, remember the error code
+    A dump whose descriptor block fails its crc still gets placed, but
+    every sector it provides is flagged suspect. Overlaps: first valid
+    placement wins; a suspect placement can be upgraded by a later
+    trustworthy one.
+    """
+    records, rejected = load_dumps(dumps_dir)
+    if not records:
+        sys.exit('No valid dump disks found in %s' % dumps_dir)
+
+    image_out = bytearray(total * SECTOR)
+    covered = bytearray(total)
+    suspect = bytearray(total)
+    err_codes: dict[int, int] = {}
+    headskipped_lbas: set[int] = set()
+    overlaps: list[Overlap] = []
+    upgrades_total = 0
+
+    for rec in records:
+        ov = 0
+        upgraded = 0
+        for blk in rec.ev.blocks:
+            trust = blk.crc_ok
+            for e in blk.entries:
+                if e.lba >= total:
+                    continue
+                if has_data(e.status):
+                    if e.data_idx < len(blk.datas):
+                        sec = blk.datas[e.data_idx]
+                        if covered[e.lba]:
+                            ov += 1
+                            if trust and suspect[e.lba]:
+                                suspect[e.lba] = 0
+                                image_out[e.lba * SECTOR:(e.lba + 1) * SECTOR] = sec
+                                upgraded += 1
+                            continue
+                        image_out[e.lba * SECTOR:(e.lba + 1) * SECTOR] = sec
+                    if covered[e.lba]:
+                        ov += 1
+                        continue
+                    covered[e.lba] = 1
+                    if not trust:
+                        suspect[e.lba] = 1
+                elif e.status == ST_HEADSKIP:
+                    headskipped_lbas.add(e.lba)
+                else:
+                    prev = err_codes.get(e.lba)
+                    if prev is None or e.status < prev:
+                        err_codes[e.lba] = e.status
+        if ov:
+            overlaps.append(Overlap(file=rec.file, count=ov))
+        upgrades_total += upgraded
+
+    gaps = _find_gaps(total, covered, err_codes, headskipped_lbas)
+    coverage = sum(covered)
+
+    with open(out_path, 'wb') as f:
+        f.write(image_out)
+
+    report = StitchReport(
+        gaps=gaps,
+        chosen_files=[r.file for r in records],
+        err_codes=err_codes,
+        headskipped_lbas=headskipped_lbas,
+        suspect_count=sum(suspect),
+        coverage=coverage,
+        overlaps=overlaps,
+        upgrades=upgrades_total,
+        complete=not gaps,
+        total=total,
+        rejected=rejected,
+        records=records,
+    )
+    report_path = os.path.splitext(out_path)[0] + '_report.txt'
+    write_report(report_path, report, dumps_dir)
+    if verbose:
+        print_assembly_summary(report, out_path, report_path)
+    return report
+
+
+def missing_lba_ranges(rep: StitchReport) -> tuple[list[tuple[int, int]], list[tuple[int, int]]]:
+    """Compute two lists of (start, end) LBA ranges from a stitch report.
 
     truly_missing:   LBAs with no data, no error log, not headskipped.
                      (these are the 'gaps' in the report)
     missing_or_skipped: same, plus LBAs that were headskipped.
     """
-    truly_missing = rep['gaps']
+    truly_missing = rep.gaps
 
-    problem: set[int] = set(rep['headskipped_lbas'])
+    problem: set[int] = set(rep.headskipped_lbas)
     for g0, g1 in truly_missing:
         for lba in range(g0, g1 + 1):
             problem.add(lba)
@@ -177,48 +178,48 @@ def _wrap_integers(values: list[int], indent: int, width: int) -> list[str]:
     return lines
 
 
-def write_report(path: str, rep: dict, dumps_dir: str) -> None:
+def write_report(path: str, rep: StitchReport, dumps_dir: str) -> None:
     lines: list[str] = []
     ap = lines.append
     ap('HDD recovery assembly report')
     ap('generated : %s' % time.strftime('%Y-%m-%d %H:%M:%S'))
     ap('source    : %s' % os.path.abspath(dumps_dir))
     ap('output    : %s' % os.path.abspath(path).replace('_report', ''))
-    ap('drive size: %d sectors (%.2f MB)' % (rep['total'], rep['total'] * SECTOR / 1048576.0))
+    ap('drive size: %d sectors (%.2f MB)' % (rep.total, rep.total * SECTOR / 1048576.0))
     ap('')
     ap('=== disks used ===')
     ap('%-24s %-9s %-9s %-7s' % ('file', 'lbas', 'data', 'blocks'))
-    for rec in rep['chosen_records']:
+    for rec in rep.records:
         ap('%-24s %-9d %-9d %-7d' % (
-            rec['file'], rec['ev']['desc_total'], rec['ev']['data_total'],
-            rec['ev']['blocks_bad']))
-    if rep['rejected']:
+            rec.file, rec.ev.desc_total, rec.ev.data_total,
+            rec.ev.blocks_bad))
+    if rep.rejected:
         ap('')
         ap('files rejected (no usable data):')
-        for fn, why in rep['rejected']:
+        for fn, why in rep.rejected:
             ap('  %-24s %s' % (fn, why))
-    if rep['overlaps']:
+    if rep.overlaps:
         ap('')
         ap('overlapping placements (first valid wins):')
-        for fn, ov in rep['overlaps']:
-            ap('  %s: %d sectors already covered' % (fn, ov))
+        for ov in rep.overlaps:
+            ap('  %s: %d sectors already covered' % (ov.file, ov.count))
     ap('')
     ap('=== coverage ===')
     ap('sectors covered : %d / %d (%.2f%%)' % (
-        rep['coverage'], rep['total'], 100.0 * rep['coverage'] / rep['total']))
+        rep.coverage, rep.total, 100.0 * rep.coverage / rep.total))
     ap('suspect sectors : %d (data from descriptor blocks with failed crc)'
-       % rep['suspect_count'])
+       % rep.suspect_count)
     ap('head-filtered   : %d lbas were never attempted (head bitmask), left '
-       'for another pass' % len(rep['headskipped_lbas']))
+       'for another pass' % len(rep.headskipped_lbas))
     ap('upgraded        : %d sectors where a later dump recovered suspect data'
-       % rep['upgrades'])
+       % rep.upgrades)
     ap('read failures   : %d lbas with logged bios error codes'
-       % len(rep['err_codes']))
-    if rep['err_codes']:
+       % len(rep.err_codes))
+    if rep.err_codes:
         ap('')
         ap('=== read failures by code ===')
         by_code: dict[int, list[int]] = {}
-        for lba, code in sorted(rep['err_codes'].items()):
+        for lba, code in sorted(rep.err_codes.items()):
             by_code.setdefault(code, []).append(lba)
         for code in sorted(by_code):
             lbas = by_code[code]
@@ -226,10 +227,10 @@ def write_report(path: str, rep: dict, dumps_dir: str) -> None:
                 code, status_name(code), len(lbas)))
             for line in _wrap_integers(lbas, indent=4, width=74):
                 ap(line)
-    if rep['gaps']:
+    if rep.gaps:
         ap('')
         ap('missing ranges (never attempted):')
-        for g0, g1 in rep['gaps']:
+        for g0, g1 in rep.gaps:
             ap('  lba %d..%d  (%d sectors, %.2f MB)' % (
                 g0, g1, g1 - g0 + 1, (g1 - g0 + 1) * SECTOR / 1048576.0))
             ap('    to fill: boot dumper with resume LBA=%d, new disk number,' % g0)
@@ -238,7 +239,7 @@ def write_report(path: str, rep: dict, dumps_dir: str) -> None:
         ap('missing ranges: none')
     ap('')
     ap('status: %s' % ('COMPLETE - all sectors either restored or known-bad'
-                      if rep['complete'] else
+                      if rep.complete else
                       'INCOMPLETE - missing ranges'))
     with open(path, 'w') as f:
         f.write('\n'.join(lines) + '\n')
@@ -267,20 +268,21 @@ def cmd_missing(args: argparse.Namespace) -> None:
         print('  none')
 
 
-def print_assembly_summary(rep: dict, out_path: str, report_path: str) -> None:
+def print_assembly_summary(rep: StitchReport, out_path: str,
+                           report_path: str) -> None:
     print('Disks used   : %d (%d files rejected)'
-          % (len(rep['chosen_files']), len(rep['rejected'])))
+          % (len(rep.chosen_files), len(rep.rejected)))
     print('Coverage     : %d / %d sectors (%.2f%%)'
-          % (rep['coverage'], rep['total'], 100.0 * rep['coverage'] / rep['total']))
-    print('Suspect      : %d sectors (from blocks with failed crc)' % rep['suspect_count'])
+          % (rep.coverage, rep.total, 100.0 * rep.coverage / rep.total))
+    print('Suspect      : %d sectors (from blocks with failed crc)' % rep.suspect_count)
     print('Head-filtered: %d lbas (not attempted, awaiting another pass)'
-          % len(rep['headskipped_lbas']))
-    print('Upgrades     : %d sectors (recovered by a later dump)' % rep['upgrades'])
-    print('Read failures: %d lbas with logged bios error codes' % len(rep['err_codes']))
-    if rep['gaps']:
+          % len(rep.headskipped_lbas))
+    print('Upgrades     : %d sectors (recovered by a later dump)' % rep.upgrades)
+    print('Read failures: %d lbas with logged bios error codes' % len(rep.err_codes))
+    if rep.gaps:
         print('Missing ranges:')
-        for g0, g1 in rep['gaps']:
+        for g0, g1 in rep.gaps:
             print('  %d..%d (%d sectors)' % (g0, g1, g1 - g0 + 1))
     print('Wrote %s' % out_path)
     print('Wrote %s' % report_path)
-    print('Status: %s' % ('COMPLETE' if rep['complete'] else 'INCOMPLETE'))
+    print('Status: %s' % ('COMPLETE' if rep.complete else 'INCOMPLETE'))

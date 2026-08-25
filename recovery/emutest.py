@@ -7,7 +7,8 @@ import struct
 import sys
 import time
 
-from format import SECTOR, ST_HEADSKIP, has_data
+from structures import ST_HEADSKIP, has_data
+from format import SECTOR
 from assemble import load_dumps
 
 
@@ -41,16 +42,16 @@ def load_placement(dumps_dir: str, total: int) -> tuple[bytearray, dict[int, int
     errs: dict[int, int] = {}
     skips: set[int] = set()
     for rec in records:
-        for g in rec['ev']['groups']:
-            for lba, st, _didx in g['entries']:
-                if lba >= total:
+        for blk in rec.ev.blocks:
+            for e in blk.entries:
+                if e.lba >= total:
                     continue
-                if has_data(st):
-                    covered[lba] = 1
-                elif st == ST_HEADSKIP:
-                    skips.add(lba)
+                if has_data(e.status):
+                    covered[e.lba] = 1
+                elif e.status == ST_HEADSKIP:
+                    skips.add(e.lba)
                 else:
-                    errs.setdefault(lba, st)
+                    errs.setdefault(e.lba, e.status)
     return covered, errs, skips, len(records)
 
 

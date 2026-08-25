@@ -6,8 +6,10 @@ import struct
 import sys
 import tempfile
 
+from structures import (ST_OK, ST_HEADSKIP, has_data,
+                        Descriptor, DescriptorBlock)
 from format import (SECTOR, DISK_BYTES, DESC_PER_BLOCK, ENTRY_SIZE,
-                    ST_OK, ST_HEADSKIP, has_data, crc16)
+                    crc16)
 from assemble import run_assembly, missing_lba_ranges
 
 
@@ -15,18 +17,18 @@ def fake_sector(lba: int) -> bytes:
     return bytes(((lba * 7 + j * 13 + (j >> 4)) & 0xFF) for j in range(SECTOR))
 
 
-def good_range(lo: int, hi: int) -> list[tuple[int, int]]:
-    """Produce (lba, ST_OK) pairs for every lba in [lo, hi)."""
-    return [(l, ST_OK) for l in range(lo, hi)]
+def good_range(lo: int, hi: int) -> list[Descriptor]:
+    """Produce Descriptors with ST_OK for every lba in [lo, hi)."""
+    return [Descriptor(l, ST_OK, 0) for l in range(lo, hi)]
 
 
-def make_disk(seq: list[tuple[int, int]], total: int,
+def make_disk(seq: list[Descriptor], total: int,
               corrupt_group: int | None = None,
               corrupt_byte: int | None = None) -> bytes:
     """Build a 1.44MB image exactly like the 286 tool writes it.
 
-    seq: ordered list of (lba, status) pairs this disk covers. Data is
-    generated for every status that carries data; others contribute
+    seq: ordered list of Descriptors this disk covers. Data is
+    generated for every descriptor that carries data; others contribute
     only their descriptor. corrupt_group/corrupt_byte flip one byte in
     the given group's descriptor block AFTER its crc was appended,
     simulating media rot.
@@ -38,13 +40,13 @@ def make_disk(seq: list[tuple[int, int]], total: int,
         block = bytearray(SECTOR)
         block[0] = len(grp)
         datas: list[bytes] = []
-        for k, (lba, st) in enumerate(grp):
+        for k, desc in enumerate(grp):
             off = 1 + k * ENTRY_SIZE
-            block[off:off + 3] = lba.to_bytes(3, 'little')
-            block[off + 3] = st
-            if has_data(st):
+            block[off:off + 3] = desc.lba.to_bytes(3, 'little')
+            block[off + 3] = desc.status
+            if has_data(desc.status):
                 block[off + 4] = len(datas)
-                datas.append(fake_sector(lba))
+                datas.append(fake_sector(desc.lba))
         struct.pack_into('<H', block, 506, crc16(bytes(block[0:506])))
         if gi == corrupt_group:
             block[corrupt_byte] ^= 0xFF
@@ -72,8 +74,8 @@ def cmd_selftest(args: argparse.Namespace) -> None:
     # none of those are gaps: every lba is accounted for -> COMPLETE.
     total_a = 2000
     seq0 = good_range(0, total_a)
-    seq0[5] = (5, 0x04)                       # sector not found
-    seq0[1500] = (1500, ST_HEADSKIP)          # head masked this pass
+    seq0[5] = Descriptor(5, 0x04, 0)       # sector not found
+    seq0[1500] = Descriptor(1500, ST_HEADSKIP, 0)  # head masked
     with tempfile.TemporaryDirectory() as td:
         _write_file(td, 'disk_000.raw',
                     make_disk(seq0, total_a, corrupt_group=1, corrupt_byte=400))
@@ -89,16 +91,16 @@ def cmd_selftest(args: argparse.Namespace) -> None:
         checks.append(('A dead sector left empty',
                        data[5 * SECTOR:6 * SECTOR] == bytes(SECTOR)))
         checks.append(('A dead sector error logged',
-                       rep['err_codes'].get(5) == 0x04))
+                       rep.err_codes.get(5) == 0x04))
         checks.append(('A headskip tracked',
-                       1500 in rep['headskipped_lbas']
+                       1500 in rep.headskipped_lbas
                        and data[1500 * SECTOR:(1501) * SECTOR] == bytes(SECTOR)))
-        checks.append(('A no true gaps', rep['gaps'] == []))
+        checks.append(('A no true gaps', rep.gaps == []))
         checks.append(('A corrupt block detected',
-                       rep['chosen_records'][0]['ev']['blocks_bad'] == 1))
+                       rep.records[0].ev.blocks_bad == 1))
         checks.append(('A corrupt block data suspect',
-                       rep['suspect_count'] == DESC_PER_BLOCK))
-        checks.append(('A complete despite known-bad', rep['complete']))
+                       rep.suspect_count == DESC_PER_BLOCK))
+        checks.append(('A complete despite known-bad', rep.complete))
 
     # scenario B: only first half of the drive dumped -> the uncovered
     # tail must be reported as a gap and the status must be INCOMPLETE.
@@ -108,9 +110,9 @@ def cmd_selftest(args: argparse.Namespace) -> None:
         out = os.path.join(td, 'out.img')
         rep = run_assembly(td, out, 3000, verbose=False)
         checks.append(('B tail reported as gap',
-                       rep['gaps'] == [(2000, 2999)]))
+                       rep.gaps == [(2000, 2999)]))
         checks.append(('B incomplete without full coverage',
-                       rep['complete'] is False))
+                       rep.complete is False))
 
     # scenario C: same range dumped twice - once with a corrupt descriptor
     # block (data lands as suspect), then cleanly. the clean dump must
@@ -124,17 +126,19 @@ def cmd_selftest(args: argparse.Namespace) -> None:
         out = os.path.join(td, 'out.img')
         rep = run_assembly(td, out, total_c, verbose=False)
 
-        checks.append(('C upgrade happened', rep['upgrades'] > 0))
-        checks.append(('C no suspects remain', rep['suspect_count'] == 0))
+        checks.append(('C upgrade happened', rep.upgrades > 0))
+        checks.append(('C no suspects remain', rep.suspect_count == 0))
         checks.append(('C overlap counted',
-                       rep['overlaps'] == [('disk_001.raw', len(seq3))]))
+                       len(rep.overlaps) == 1
+                       and rep.overlaps[0].file == 'disk_001.raw'
+                       and rep.overlaps[0].count == len(seq3)))
 
     # scenario D: test missing_lba_ranges with a mix of covered,
     # headskipped, read-failed, and truly missing sectors.
     total_d = 2000
     seq4 = good_range(100, 400)        # 100..399 covered
-    seq4[50] = (150, ST_HEADSKIP)      # 150 headskipped
-    seq4[100] = (300, 0x04)            # 300 read-failed
+    seq4[50] = Descriptor(150, ST_HEADSKIP, 0)   # 150 headskipped
+    seq4[100] = Descriptor(300, 0x04, 0)         # 300 read-failed
     # lba 0..99 never attempted, 400..1999 never attempted
     with tempfile.TemporaryDirectory() as td:
         _write_file(td, 'disk_000.raw', make_disk(seq4, total_d))

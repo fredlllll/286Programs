@@ -2,19 +2,8 @@
 
 import argparse
 
-from format import has_data, ST_HEADSKIP
+from structures import has_data, ST_HEADSKIP
 from assemble import load_dumps
-
-MAP_COLORS: dict[int, str] = {
-    0: '#bdbdbd',   # never attempted
-    1: '#2ea44f',   # readable
-    2: '#d93025',   # hdd read failed (bios error logged in descriptor)
-    3: '#e08a00',   # head masked out this pass, awaiting another run
-}
-MAP_NAMES: dict[int, str] = {
-    0: 'not attempted', 1: 'readable', 2: 'hdd read failed',
-    3: 'head masked',
-}
 
 
 def build_badmap_state(dumps_dir: str, cyls: int, heads: int,
@@ -31,21 +20,33 @@ def build_badmap_state(dumps_dir: str, cyls: int, heads: int,
     total = cyls * heads * spt
     state = bytearray(total)          # 0 = untouched
     for rec in records:
-        for g in rec['ev']['groups']:
-            for lba, st, _didx in g['entries']:
-                if lba >= total:
+        for blk in rec.ev.blocks:
+            for e in blk.entries:
+                if e.lba >= total:
                     continue
-                if has_data(st):
-                    state[lba] = 1
-                elif st == ST_HEADSKIP:
-                    if state[lba] == 0:
-                        state[lba] = 3
+                if has_data(e.status):
+                    state[e.lba] = 1
+                elif e.status == ST_HEADSKIP:
+                    if state[e.lba] == 0:
+                        state[e.lba] = 3
                 else:
-                    if state[lba] < 2:
-                        state[lba] = 2
+                    if state[e.lba] < 2:
+                        state[e.lba] = 2
     nerr = sum(1 for l in range(total) if state[l] == 2)
     nskip = sum(1 for l in range(total) if state[l] == 3)
     return state, nerr, nskip, len(records)
+
+
+MAP_COLORS: dict[int, str] = {
+    0: '#bdbdbd',   # never attempted
+    1: '#2ea44f',   # readable
+    2: '#d93025',   # hdd read failed (bios error logged in descriptor)
+    3: '#e08a00',   # head masked out this pass, awaiting another run
+}
+MAP_NAMES: dict[int, str] = {
+    0: 'not attempted', 1: 'readable', 2: 'hdd read failed',
+    3: 'head masked',
+}
 
 
 def cmd_badmap(args: argparse.Namespace) -> None:
