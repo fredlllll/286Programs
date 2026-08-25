@@ -29,7 +29,8 @@ def link_main():
     result = os.system("wlink file " + obj + " format raw bin name " +
                        os.path.join(OBJ_DIR, "main.bin") +
                        " option NODEFAULTLIBS,verbose,start=main_,OFFSET=0x7E00,map=" +
-                       os.path.join(OBJ_DIR, "main.map"))
+                       os.path.join(OBJ_DIR, "main.map") +
+                       " order clname CODE SEGMENT start_segment")
     if result != 0:
         sys.exit("failed to link main.bin")
     check_memory_layout()

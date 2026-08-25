@@ -60,6 +60,7 @@ static uint8_t serialRx(uint8_t* ch){
 void _cstart(void){
 }
 
+#pragma code_seg ( "start_segment" )
 void main(void){
   uint8_t ch;
   uint8_t state;
@@ -87,7 +88,8 @@ void main(void){
         if(ch == ping[0]){
           state = 1;
         }
-      }
-    }
+  }
+}
+#pragma code_seg ()
   }
 }
