@@ -4,11 +4,11 @@ import sys
 
 SOURCE = "serial_test"
 OBJ_DIR = "obj"
-BOOTLOADER = "../watcomc/bootloader.c"
+BOOTLOADER = "../../watcomc/bootloader.c"
 
 ARENA_SEG = 0x1000
 
-WCC_FLAGS = "-2 -d0 -wx -ms -s -zl -i=. -i=../watcomc/source"
+WCC_FLAGS = "-2 -d0 -wx -ms -s -zl -i=. -i=../../watcomc/source"
 
 def silent_remove(filename):
     try:
