@@ -1,4 +1,6 @@
+using System.IO;
 using System.IO.Ports;
+using System.Net.Sockets;
 using HddSaver.Data;
 using HddSaver.Models;
 using HddSaver.Protocol;
@@ -8,7 +10,9 @@ namespace HddSaver.Services;
 
 public class SerialReceiver : IDisposable
 {
+    private Stream? _stream;
     private SerialPort? _port;
+    private TcpClient? _tcp;
     private CancellationTokenSource? _cts;
     private Task? _readTask;
 
@@ -21,10 +25,10 @@ public class SerialReceiver : IDisposable
     private int _sectorsReceived;
     private int _errors;
 
-    public bool IsConnected => _port?.IsOpen == true;
+    public bool IsConnected => _stream != null;
     public bool IsReceiving { get; private set; }
 
-    public void Connect(string portName, int baudRate = 9600)
+    public void ConnectSerial(string portName, int baudRate = 9600)
     {
         Disconnect();
         _port = new SerialPort(portName, baudRate, Parity.None, 8, StopBits.One)
@@ -33,29 +37,42 @@ public class SerialReceiver : IDisposable
             WriteTimeout = 1000
         };
         _port.Open();
+        _stream = _port.BaseStream;
         Log?.Invoke($"Connected to {portName} @ {baudRate}");
+    }
+
+    public void ConnectTcp(string host, int port)
+    {
+        Disconnect();
+        _tcp = new TcpClient();
+        _tcp.Connect(host, port);
+        _tcp.NoDelay = true;
+        _stream = _tcp.GetStream();
+        _stream.ReadTimeout = 5000;
+        _stream.WriteTimeout = 1000;
+        Log?.Invoke($"Connected to {host}:{port} (TCP)");
     }
 
     public void Disconnect()
     {
         StopReceiving();
-        if (_port?.IsOpen == true)
-        {
-            _port.Close();
-        }
+        _stream?.Close();
+        _stream = null;
         _port?.Dispose();
         _port = null;
+        _tcp?.Dispose();
+        _tcp = null;
         Log?.Invoke("Disconnected");
     }
 
     public async Task SendCommand(byte cmd, byte[]? payload = null)
     {
-        if (_port == null || !_port.IsOpen) return;
+        if (_stream == null) return;
         await Task.Run(() =>
         {
-            _port.Write(new[] { cmd }, 0, 1);
+            _stream.Write(new[] { cmd }, 0, 1);
             if (payload != null)
-                _port.Write(payload, 0, payload.Length);
+                _stream.Write(payload, 0, payload.Length);
         });
     }
 
@@ -65,7 +82,7 @@ public class SerialReceiver : IDisposable
         await Task.Run(() =>
         {
             var buf = new byte[1];
-            _port!.Read(buf, 0, 1);
+            _stream!.Read(buf, 0, 1);
             if (buf[0] == Command.READY)
                 Log?.Invoke("286 is ready");
             else
@@ -81,7 +98,7 @@ public class SerialReceiver : IDisposable
         _sectorsReceived = 0;
         _errors = 0;
         IsReceiving = true;
-        _port?.DiscardInBuffer();
+        if (_port != null) _port.DiscardInBuffer();
         await SendCommand(Command.START);
         Log?.Invoke("Dump started");
         StartReading();
@@ -135,7 +152,7 @@ public class SerialReceiver : IDisposable
 
     private async Task ReadLoop(CancellationToken ct)
     {
-        while (!ct.IsCancellationRequested && _port?.IsOpen == true)
+        while (!ct.IsCancellationRequested && _stream != null)
         {
             try
             {
@@ -196,7 +213,8 @@ public class SerialReceiver : IDisposable
             ct.ThrowIfCancellationRequested();
             int read = await Task.Run(() =>
             {
-                try { return _port!.Read(buffer, offset, buffer.Length - offset); }
+                try { return _stream!.Read(buffer, offset, buffer.Length - offset); }
+                catch (IOException) { return 0; }
                 catch (TimeoutException) { return 0; }
             }, ct);
             if (read == 0)

@@ -127,7 +127,8 @@ static uint8_t sendOneSector(void){
    wait for pc to send start. then stream sectors until:
    - all sectors sent (drive fully dumped)
    - pc sends stop
-   - user presses esc */
+   - user presses esc
+   after stop, loop back to idle so pc can resume later */
 static uint8_t stopRequested;
 
 void program(void){
@@ -136,55 +137,62 @@ void program(void){
   print("hdd saver 3.1 - serial mode\r\n");
   print("waiting for pc connection...\r\n");
 
-  /* main loop: idle until pc sends start */
+  /* outer loop: idle → stream → stop → idle */
   while(1){
-    cmd = waitForCommand(0); /* wait forever */
-    printCmd(cmd);
-    if(cmd == CMD_START){
-      print("dump started\r\n");
-      break;
-    }
-    if(cmd == CMD_PING){
-      sendResponse(UART_COM1, RESP_READY);
-    }
-    if(cmd == CMD_STATUS){
-      sendStatusReply(UART_COM1, &hddGeom, hddPos.lba, headMask, hddRetries);
-    }
-    if(cmd == CMD_HEAD_MASK){
-      uint8_t tmp;
-      if(recvBlockTimeout(UART_COM1, &tmp, 1, 18)){
-        headMask = tmp;
-        sendResponse(UART_COM1, RESP_ACK);
+
+    /* main loop: idle until pc sends start */
+    while(1){
+      cmd = waitForCommand(0); /* wait forever */
+      printCmd(cmd);
+      if(cmd == CMD_START){
+        print("dump started\r\n");
+        break;
+      }
+      if(cmd == CMD_PING){
+        sendResponse(UART_COM1, RESP_READY);
+      }
+      if(cmd == CMD_STATUS){
+        sendStatusReply(UART_COM1, &hddGeom, hddPos.lba, headMask, hddRetries);
+      }
+      if(cmd == CMD_HEAD_MASK){
+        uint8_t tmp;
+        if(recvBlockTimeout(UART_COM1, &tmp, 1, 18)){
+          headMask = tmp;
+          sendResponse(UART_COM1, RESP_ACK);
+        }
+      }
+      if(cmd == CMD_RETRIES){
+        uint8_t tmp;
+        if(recvBlockTimeout(UART_COM1, &tmp, 1, 18)){
+          hddRetries = tmp;
+          sendResponse(UART_COM1, RESP_ACK);
+        }
       }
     }
-    if(cmd == CMD_RETRIES){
-      uint8_t tmp;
-      if(recvBlockTimeout(UART_COM1, &tmp, 1, 18)){
-        hddRetries = tmp;
-        sendResponse(UART_COM1, RESP_ACK);
+
+    /* streaming loop */
+    stopRequested = 0;
+    while(hddPos.lba < hddGeom.totalSectors && !stopRequested){
+      if(escPressed()){
+        stopRequested = 1;
+        break;
       }
+      if(!sendOneSector()){
+        break;
+      }
+      /* progress to log */
+      print(".");
     }
-  }
 
-  /* streaming loop */
-  stopRequested = 0;
-  while(hddPos.lba < hddGeom.totalSectors && !stopRequested){
-    if(escPressed()){
-      stopRequested = 1;
-      break;
+    if(hddPos.lba >= hddGeom.totalSectors){
+      print("\r\ndump complete!\r\n");
+      return;
+    } else {
+      print("\r\ndump paused at lba ");
+      printDecLong(hddPos.lba);
+      print("\r\n");
+      /* loop back to idle so pc can resume */
     }
-    if(!sendOneSector()){
-      break;
-    }
-    /* progress to log */
-    print(".");
-  }
 
-  if(hddPos.lba >= hddGeom.totalSectors){
-    print("\r\ndump complete!\r\n");
-  } else {
-    print("\r\ndump paused at lba ");
-    printDecLong(hddPos.lba);
-    print("\r\n");
   }
 }

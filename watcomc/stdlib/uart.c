@@ -86,3 +86,9 @@ uint8_t uartDetect(uint16_t base){
   if(v == 0xAA) return 2;    /* 16550 or better */
   return 1;                   /* 8250 or 16450 */
 }
+
+void uartFlushRx(uint16_t base){
+  while(inb(UART_LSR(base)) & 0x01){
+    inb(UART_RBR(base));
+  }
+}

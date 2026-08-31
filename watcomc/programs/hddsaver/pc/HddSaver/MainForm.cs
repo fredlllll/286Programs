@@ -48,6 +48,16 @@ public partial class MainForm : Form
     private async void btnApplyConfig_Click(object? sender, EventArgs e) => await ApplyConfig();
     private void btnBadMap_Click(object? sender, EventArgs e) => GenerateBadMap();
 
+    private void chkTcp_CheckedChanged(object? sender, EventArgs e)
+    {
+        var tcp = chkTcp.Checked;
+        cmbPort.Visible = !tcp;
+        cmbBaud.Visible = !tcp;
+        txtTcpHost.Visible = tcp;
+        lblTcpHost.Visible = tcp;
+        txtTcpPort.Visible = tcp;
+    }
+
     private async Task ToggleConnection()
     {
         if (_receiver.IsConnected)
@@ -61,11 +71,21 @@ public partial class MainForm : Form
         {
             try
             {
-                var baud = int.Parse(cmbBaud.Text);
-                _receiver.Connect(cmbPort.Text, baud);
+                if (chkTcp.Checked)
+                {
+                    var host = txtTcpHost.Text;
+                    var port = int.Parse(txtTcpPort.Text);
+                    _receiver.ConnectTcp(host, port);
+                    lblConnStatus.Text = $"TCP {host}:{port}";
+                }
+                else
+                {
+                    var baud = int.Parse(cmbBaud.Text);
+                    _receiver.ConnectSerial(cmbPort.Text, baud);
+                    lblConnStatus.Text = $"Serial {cmbPort.Text} @ {baud}";
+                }
                 btnConnect.Text = "Disconnect";
                 SetControlsEnabled(true);
-                lblConnStatus.Text = $"Connected @ {baud}";
                 await Task.Delay(1000);
                 await PingDevice();
             }

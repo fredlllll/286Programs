@@ -19,6 +19,9 @@ partial class MainForm
         cmbBaud = new ComboBox();
         btnConnect = new Button();
         lblConnStatus = new Label();
+        chkTcp = new CheckBox();
+        txtTcpHost = new TextBox();
+        txtTcpPort = new TextBox();
         btnStart = new Button();
         btnStop = new Button();
         txtSeekLba = new TextBox();
@@ -84,7 +87,18 @@ partial class MainForm
         lblConnStatus.Width = 200;
         lblConnStatus.AutoSize = true;
         lblConnStatus.Margin = new Padding(10, 6, 0, 0);
-        connPanel.Controls.AddRange(new Control[] { cmbPort, cmbBaud, btnConnect, lblConnStatus });
+        chkTcp.Text = "TCP";
+        chkTcp.AutoSize = true;
+        chkTcp.Margin = new Padding(10, 6, 0, 0);
+        chkTcp.CheckedChanged += chkTcp_CheckedChanged;
+        txtTcpHost.Width = 100;
+        txtTcpHost.Text = "localhost";
+        txtTcpPort.Width = 50;
+        txtTcpPort.Text = "4321";
+        txtTcpHost.Visible = false;
+        txtTcpPort.Visible = false;
+        lblTcpHost = new Label { Text = ":", AutoSize = true, Margin = new Padding(0, 6, 0, 0), Visible = false };
+        connPanel.Controls.AddRange(new Control[] { cmbPort, cmbBaud, chkTcp, txtTcpHost, lblTcpHost, txtTcpPort, btnConnect, lblConnStatus });
 
         // ctrlPanel
         ctrlPanel.Dock = DockStyle.Fill;
@@ -218,6 +232,10 @@ partial class MainForm
     private ComboBox cmbBaud;
     private Button btnConnect;
     private Label lblConnStatus;
+    private CheckBox chkTcp;
+    private TextBox txtTcpHost;
+    private Label lblTcpHost;
+    private TextBox txtTcpPort;
     private Button btnStart;
     private Button btnStop;
     private TextBox txtSeekLba;

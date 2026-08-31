@@ -32,6 +32,9 @@ void uartSendBlock(uint16_t base, const uint8_t *data, uint16_t len);
 /* receive a block of bytes */
 void uartRecvBlock(uint16_t base, uint8_t *data, uint16_t len);
 
+/* flush receive buffer: discard all pending bytes */
+void uartFlushRx(uint16_t base);
+
 /* detect uart type: 0=unknown, 1=8250/16450, 2=16550+ */
 uint8_t uartDetect(uint16_t base);
 

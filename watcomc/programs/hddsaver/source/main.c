@@ -26,6 +26,7 @@ void main(void){
 
   /* initialize uart: 9600 baud, 8N1 */
   uartInit(UART_COM1, 12);
+  uartFlushRx(UART_COM1);
 
   /* print to screen only - no serial hello to avoid polluting receive buffer */
   print("hdd saver 3.1\r\n");
