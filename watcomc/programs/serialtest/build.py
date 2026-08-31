@@ -1,7 +1,7 @@
 import os
 import sys
 
-sys.path.insert(0, os.path.normpath(os.path.join(os.path.dirname(__file__), "..", "..", "stdlib")))
+sys.path.insert(0, os.path.normpath(os.path.join(os.path.dirname(__file__), "..", "..")))
 from buildlib import build_program
 
 build_program({
