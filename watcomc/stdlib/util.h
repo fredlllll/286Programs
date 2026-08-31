@@ -20,6 +20,9 @@ void poke32(uint8_t* p, uint32_t v);
 void crcInit(void);
 uint16_t crcBuf(uint16_t crc, uint8_t* p, uint16_t n);
 
+/* one-shot crc16 over a buffer (calls crcInit internally) */
+uint16_t crc16(const uint8_t* p, uint16_t n);
+
 /* compares two 512 byte sector buffers, returns 0 if identical,
    nonzero otherwise. far pointers so a floppy verify can compare a
    dgroup stack buffer against data in the far sector arena */

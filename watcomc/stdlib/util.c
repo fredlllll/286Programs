@@ -73,6 +73,10 @@ uint16_t crcBuf(uint16_t crc, uint8_t* p, uint16_t n){
   return crc;
 }
 
+uint16_t crc16(const uint8_t* p, uint16_t n){
+  return crcBuf(0xFFFF, (uint8_t*)p, n);
+}
+
 /* sector sized compare, used to verify a floppy write by reading the
    sector back and comparing against what we intended to write */
 uint8_t memcmpBuf(uint8_t __far *a, uint8_t __far *b){
