@@ -16,9 +16,9 @@ def silent_remove(filename):
         pass
 
 def make_wcc_flags(source_dir, stdlib_dir=None):
-    flags = WCC_BASE + " -i=" + source_dir
+    flags = WCC_BASE + ' -i="' + source_dir + '"'
     if stdlib_dir:
-        flags += " -i=" + stdlib_dir
+        flags += ' -i="' + stdlib_dir + '"'
     return flags
 
 def list_sources(source_dir):
@@ -32,7 +32,7 @@ def compile_source(name, src_dir, wcc_flags, obj_dir):
     src = os.path.join(src_dir, name + ".c")
     obj = os.path.join(obj_dir, name + ".obj")
     err = os.path.join(obj_dir, name + ".err")
-    result = os.system("wcc " + wcc_flags + " -fo=" + obj + " -fr=" + err + " " + src)
+    result = os.system('wcc ' + wcc_flags + ' -fo="' + obj + '" -fr="' + err + '" "' + src + '"')
     if result != 0:
         sys.exit("failed to compile " + src)
 
@@ -54,12 +54,17 @@ def check_memory_layout(obj_dir, arena_seg):
         sys.exit("memory layout check: image past 16-bit offset ceiling")
 
 def link_main(names, obj_dir, wcc_flags, arena_seg):
-    objs = ",".join(os.path.join(obj_dir, n + ".obj") for n in names)
-    result = os.system("wlink file " + objs + " format raw bin name " +
-                       os.path.join(obj_dir, "main.bin") +
-                       " option NODEFAULTLIBS,verbose,start=main_,OFFSET=0x7E00,map=" +
-                       os.path.join(obj_dir, "main.map") +
-                       " order clname CODE SEGMENT start_segment")
+    main_bin = os.path.join(obj_dir, "main.bin")
+    main_map = os.path.join(obj_dir, "main.map")
+    rsp = os.path.join(obj_dir, "main.lnk")
+    with open(rsp, 'w') as f:
+        for n in names:
+            f.write("FILE " + os.path.join(obj_dir, n + ".obj") + "\n")
+        f.write("FORMAT raw bin\n")
+        f.write("NAME " + main_bin + "\n")
+        f.write("OPTION NODEFAULTLIBS,verbose,start=main_,OFFSET=0x7E00,map=" + main_map + "\n")
+        f.write("ORDER clname CODE SEGMENT start_segment\n")
+    result = os.system("wlink @" + rsp)
     if result != 0:
         sys.exit("failed to link main.bin")
     check_memory_layout(obj_dir, arena_seg)
@@ -83,14 +88,19 @@ def process_bootloader(bootloader_path, obj_dir, wcc_flags):
 
     obj = os.path.join(obj_dir, "bootloader.tmp.obj")
     err = os.path.join(obj_dir, "bootloader.tmp.err")
-    result = os.system("wcc " + wcc_flags + " -fo=" + obj + " -fr=" + err + " bootloader.tmp.c")
+    result = os.system('wcc ' + wcc_flags + ' -fo="' + obj + '" -fr="' + err + '" bootloader.tmp.c')
     os.remove("bootloader.tmp.c")
     if result != 0:
         sys.exit("failed to compile bootloader")
 
     binfile = os.path.join(obj_dir, "bootloader.bin")
-    result = os.system("wlink file " + obj + " format raw bin name " + binfile +
-                       " option NODEFAULTLIBS,verbose,start=init_,OFFSET=0x7C00")
+    rsp = os.path.join(obj_dir, "bootloader.lnk")
+    with open(rsp, 'w') as f:
+        f.write("FILE " + obj + "\n")
+        f.write("FORMAT raw bin\n")
+        f.write("NAME " + binfile + "\n")
+        f.write("OPTION NODEFAULTLIBS,verbose,start=init_,OFFSET=0x7C00\n")
+    result = os.system("wlink @" + rsp)
     if result != 0:
         sys.exit("failed to link bootloader")
 
