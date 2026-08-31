@@ -54,28 +54,21 @@ uint8_t readHddResilient(void __far *dest)
     tries++;
   } while (!isStatusSuccess(status) && tries < hddRetries);
 
-  if (isStatusSuccess(status))
-  {
-    /* 0x11 = recoverable ECC error, bios already corrected the data.
-       the distinction is preserved: the restorer may want to know
-       which sectors only survived via ecc correction */
-  print("HDD read fail CHS ");
-  printDecLong(hddPos.cyl);
-  printChar('/', 1);
-  printDecLong(hddPos.head);
-  printChar('/', 1);
-  printDecLong(hddPos.sec);
-  print(" LBA: ");
-  printDecLong(hddPos.lba);
-  print(" Status: ");
-  printInt13Status(status);
-  print("\r");
-
-  return status;
-  }
-  else
+  if (!isStatusSuccess(status))
   {
     resetDiskSystem(0x80); /* clean up controller state for next sector */
+
+    print("HDD read fail CHS ");
+    printDecLong(hddPos.cyl);
+    printChar('/', 1);
+    printDecLong(hddPos.head);
+    printChar('/', 1);
+    printDecLong(hddPos.sec);
+    print(" LBA: ");
+    printDecLong(hddPos.lba);
+    print(" Status: ");
+    printInt13Status(status);
+    print("\r");
   }
 
   return status;
