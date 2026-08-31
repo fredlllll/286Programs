@@ -27,10 +27,7 @@ void main(void){
   /* initialize uart: 9600 baud, 8N1 */
   uartInit(UART_COM1, 12);
 
-  /* say hello on serial */
-  uartSendBlock(UART_COM1, (uint8_t*)"hdd saver 3.1 ready\r\n", 21);
-
-  /* also print to screen */
+  /* print to screen only - no serial hello to avoid polluting receive buffer */
   print("hdd saver 3.1\r\n");
   print("serial: 9600 8N1\r\n");
 

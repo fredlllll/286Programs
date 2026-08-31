@@ -19,6 +19,25 @@
 #include "protocol.h"
 #include "uart.h"
 
+static void printCmd(uint8_t cmd){
+  switch(cmd){
+    case CMD_START:     print("[cmd] START\r\n"); break;
+    case CMD_STOP:      print("[cmd] STOP\r\n"); break;
+    case CMD_SEEK:      print("[cmd] SEEK\r\n"); break;
+    case CMD_PING:      print("[cmd] PING\r\n"); break;
+    case CMD_STATUS:    print("[cmd] STATUS\r\n"); break;
+    case CMD_HEAD_MASK: print("[cmd] HEAD_MASK\r\n"); break;
+    case CMD_RETRIES:   print("[cmd] RETRIES\r\n"); break;
+    case CMD_BAUD_RATE: print("[cmd] BAUD_RATE\r\n"); break;
+    case RESP_ACK:      print("[resp] ACK\r\n"); break;
+    case RESP_NAK:      print("[resp] NAK\r\n"); break;
+    default:
+      print("[cmd] unknown 0x");
+      printHex(cmd);
+      print("\r\n"); break;
+  }
+}
+
 /* one 512 byte sector buffer. lives in dgroup like every other global */
 static uint8_t sectorBuf[DATA_SIZE];
 
@@ -58,6 +77,7 @@ static uint8_t sendOneSector(void){
   /* wait for ack or nak from pc */
   while(1){
     resp = waitForCommand(18 * 60); /* 60 second timeout */
+    printCmd(resp);
     if(resp == RESP_ACK){
       advanceHddPosition();
       return 1; /* continue */
@@ -119,6 +139,7 @@ void program(void){
   /* main loop: idle until pc sends start */
   while(1){
     cmd = waitForCommand(0); /* wait forever */
+    printCmd(cmd);
     if(cmd == CMD_START){
       print("dump started\r\n");
       break;

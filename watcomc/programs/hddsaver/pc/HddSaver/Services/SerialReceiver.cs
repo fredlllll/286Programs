@@ -92,6 +92,7 @@ public class SerialReceiver : IDisposable
         _sectorsReceived = 0;
         _errors = 0;
         IsReceiving = true;
+        _port?.DiscardInBuffer();
         await SendCommand(Command.START);
         Log?.Invoke($"Session #{_currentSession.Id} started");
         StartReading();
