@@ -15,6 +15,8 @@ public partial class MainForm : Form
     public MainForm()
     {
         InitializeComponent();
+        cmbPort.Items.AddRange(System.IO.Ports.SerialPort.GetPortNames());
+        if (cmbPort.Items.Count > 0) cmbPort.SelectedIndex = 0;
         WireEvents();
     }
 

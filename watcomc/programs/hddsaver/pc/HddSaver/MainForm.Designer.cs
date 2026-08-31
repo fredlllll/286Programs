@@ -71,8 +71,6 @@ partial class MainForm
         connPanel.WrapContents = false;
         cmbPort.Width = 100;
         cmbPort.DropDownStyle = ComboBoxStyle.DropDown;
-        cmbPort.Items.AddRange(System.IO.Ports.SerialPort.GetPortNames());
-        if (cmbPort.Items.Count > 0) cmbPort.SelectedIndex = 0;
         cmbBaud.Width = 80;
         cmbBaud.DropDownStyle = ComboBoxStyle.DropDown;
         cmbBaud.Items.AddRange(new object[] { "9600", "19200", "38400", "57600", "115200" });
