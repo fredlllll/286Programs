@@ -29,7 +29,7 @@ public class SerialReceiver : IDisposable
         Disconnect();
         _port = new SerialPort(portName, baudRate, Parity.None, 8, StopBits.One)
         {
-            ReadTimeout = 30000,
+            ReadTimeout = 5000,
             WriteTimeout = 1000
         };
         _port.Open();
@@ -120,6 +120,7 @@ public class SerialReceiver : IDisposable
 
     public void StartReading()
     {
+        StopReceiving();
         _cts = new CancellationTokenSource();
         _readTask = Task.Run(() => ReadLoop(_cts.Token));
     }
