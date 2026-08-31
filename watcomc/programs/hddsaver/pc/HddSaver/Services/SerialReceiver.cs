@@ -29,7 +29,7 @@ public class SerialReceiver : IDisposable
         Disconnect();
         _port = new SerialPort(portName, baudRate, Parity.None, 8, StopBits.One)
         {
-            ReadTimeout = 1000,
+            ReadTimeout = 30000,
             WriteTimeout = 1000
         };
         _port.Open();
@@ -174,6 +174,10 @@ public class SerialReceiver : IDisposable
             catch (OperationCanceledException)
             {
                 break;
+            }
+            catch (TimeoutException)
+            {
+                continue;
             }
             catch (Exception ex)
             {

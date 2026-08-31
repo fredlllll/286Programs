@@ -148,6 +148,10 @@ public partial class MainForm : Form
     {
         var mask = GetHeadMask();
         await _receiver.SetHeadMask(mask);
+        if (byte.TryParse(txtRetries.Text, out byte retries))
+        {
+            await _receiver.SetRetries(retries);
+        }
     }
 
     private void GenerateBadMap()

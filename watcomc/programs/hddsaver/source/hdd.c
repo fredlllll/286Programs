@@ -59,13 +59,6 @@ uint8_t readHddResilient(void __far *dest)
     /* 0x11 = recoverable ECC error, bios already corrected the data.
        the distinction is preserved: the restorer may want to know
        which sectors only survived via ecc correction */
-    return status;
-  }
-  else
-  {
-    resetDiskSystem(0x80); /* clean up controller state for next sector */
-  }
-
   print("HDD read fail CHS ");
   printDecLong(hddPos.cyl);
   printChar('/', 1);
@@ -77,6 +70,13 @@ uint8_t readHddResilient(void __far *dest)
   print(" Status: ");
   printInt13Status(status);
   print("\r");
+
+  return status;
+  }
+  else
+  {
+    resetDiskSystem(0x80); /* clean up controller state for next sector */
+  }
 
   return status;
 }

@@ -33,6 +33,8 @@ partial class MainForm
         chkHead5 = new CheckBox();
         btnApplyConfig = new Button();
         btnBadMap = new Button();
+        lblRetries = new Label();
+        txtRetries = new TextBox();
         lblProgress = new Label();
         lblSectorsReceived = new Label();
         lblErrors = new Label();
@@ -153,7 +155,12 @@ partial class MainForm
         btnApplyConfig.Width = 100;
         btnApplyConfig.Enabled = false;
         btnApplyConfig.Click += btnApplyConfig_Click;
-        cfgPanel.Controls.AddRange(new Control[] { lblHeads, chkHead0, chkHead1, chkHead2, chkHead3, chkHead4, chkHead5, btnApplyConfig });
+        lblRetries.Text = "Retries:";
+        lblRetries.AutoSize = true;
+        lblRetries.Margin = new Padding(10, 6, 0, 0);
+        txtRetries.Width = 40;
+        txtRetries.Text = "5";
+        cfgPanel.Controls.AddRange(new Control[] { lblHeads, chkHead0, chkHead1, chkHead2, chkHead3, chkHead4, chkHead5, lblRetries, txtRetries, btnApplyConfig });
 
         // progPanel
         progPanel.Dock = DockStyle.Fill;
@@ -224,6 +231,8 @@ partial class MainForm
     private CheckBox chkHead3;
     private CheckBox chkHead4;
     private CheckBox chkHead5;
+    private Label lblRetries;
+    private TextBox txtRetries;
     private Button btnApplyConfig;
     private Label lblProgress;
     private Label lblSectorsReceived;
