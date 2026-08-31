@@ -25,29 +25,27 @@ partial class MainForm
         btnSeek = new Button();
         btnPing = new Button();
         btnStatus = new Button();
-        cmbHeadMask = new ComboBox();
+        chkHead0 = new CheckBox();
+        chkHead1 = new CheckBox();
+        chkHead2 = new CheckBox();
+        chkHead3 = new CheckBox();
+        chkHead4 = new CheckBox();
+        chkHead5 = new CheckBox();
         btnApplyConfig = new Button();
         lblProgress = new Label();
         lblSectorsReceived = new Label();
         lblErrors = new Label();
         lblStatus = new Label();
         txtLog = new TextBox();
-        dgvSectors = new DataGridView();
 
         var mainLayout = new TableLayoutPanel();
         var connPanel = new FlowLayoutPanel();
         var ctrlPanel = new FlowLayoutPanel();
         var cfgPanel = new FlowLayoutPanel();
         var progPanel = new FlowLayoutPanel();
-        var bottomSplit = new SplitContainer();
         var lblSeekLba = new Label();
-        var lblHeadMask = new Label();
+        var lblHeads = new Label();
 
-        ((System.ComponentModel.ISupportInitialize)bottomSplit).BeginInit();
-        bottomSplit.Panel1.SuspendLayout();
-        bottomSplit.Panel2.SuspendLayout();
-        bottomSplit.SuspendLayout();
-        ((System.ComponentModel.ISupportInitialize)dgvSectors).BeginInit();
         mainLayout.SuspendLayout();
         connPanel.SuspendLayout();
         ctrlPanel.SuspendLayout();
@@ -60,10 +58,10 @@ partial class MainForm
         mainLayout.ColumnCount = 1;
         mainLayout.RowCount = 5;
         mainLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        mainLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 60));
-        mainLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 60));
-        mainLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 60));
-        mainLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 60));
+        mainLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 40));
+        mainLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 40));
+        mainLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 40));
+        mainLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 40));
         mainLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
 
         // connPanel
@@ -122,18 +120,38 @@ partial class MainForm
         cfgPanel.Dock = DockStyle.Fill;
         cfgPanel.FlowDirection = FlowDirection.LeftToRight;
         cfgPanel.WrapContents = false;
-        cmbHeadMask.Width = 60;
-        cmbHeadMask.DropDownStyle = ComboBoxStyle.DropDown;
-        cmbHeadMask.Items.AddRange(new object[] { "FF", "01", "02", "04", "08", "10", "20", "40", "80" });
-        cmbHeadMask.SelectedIndex = 0;
+        lblHeads.Text = "Heads:";
+        lblHeads.AutoSize = true;
+        lblHeads.Margin = new Padding(0, 6, 0, 0);
+        chkHead0.Text = "0";
+        chkHead0.AutoSize = true;
+        chkHead0.Checked = true;
+        chkHead0.Margin = new Padding(6, 6, 0, 0);
+        chkHead1.Text = "1";
+        chkHead1.AutoSize = true;
+        chkHead1.Checked = true;
+        chkHead1.Margin = new Padding(6, 6, 0, 0);
+        chkHead2.Text = "2";
+        chkHead2.AutoSize = true;
+        chkHead2.Checked = true;
+        chkHead2.Margin = new Padding(6, 6, 0, 0);
+        chkHead3.Text = "3";
+        chkHead3.AutoSize = true;
+        chkHead3.Checked = true;
+        chkHead3.Margin = new Padding(6, 6, 0, 0);
+        chkHead4.Text = "4";
+        chkHead4.AutoSize = true;
+        chkHead4.Checked = true;
+        chkHead4.Margin = new Padding(6, 6, 0, 0);
+        chkHead5.Text = "5";
+        chkHead5.AutoSize = true;
+        chkHead5.Checked = true;
+        chkHead5.Margin = new Padding(6, 6, 0, 0);
         btnApplyConfig.Text = "Apply Config";
         btnApplyConfig.Width = 100;
         btnApplyConfig.Enabled = false;
         btnApplyConfig.Click += btnApplyConfig_Click;
-        lblHeadMask.Text = "Head mask:";
-        lblHeadMask.AutoSize = true;
-        lblHeadMask.Margin = new Padding(0, 6, 0, 0);
-        cfgPanel.Controls.AddRange(new Control[] { lblHeadMask, cmbHeadMask, btnApplyConfig });
+        cfgPanel.Controls.AddRange(new Control[] { lblHeads, chkHead0, chkHead1, chkHead2, chkHead3, chkHead4, chkHead5, btnApplyConfig });
 
         // progPanel
         progPanel.Dock = DockStyle.Fill;
@@ -153,37 +171,17 @@ partial class MainForm
         lblStatus.AutoSize = true;
         progPanel.Controls.AddRange(new Control[] { lblProgress, lblSectorsReceived, lblErrors, lblStatus });
 
-        // bottomSplit
-        bottomSplit.Dock = DockStyle.Fill;
-        bottomSplit.Orientation = Orientation.Horizontal;
-        bottomSplit.SplitterDistance = 200;
-        bottomSplit.FixedPanel = FixedPanel.None;
-
         // txtLog
         txtLog.Dock = DockStyle.Fill;
         txtLog.Multiline = true;
         txtLog.ReadOnly = true;
         txtLog.ScrollBars = ScrollBars.Vertical;
 
-        // dgvSectors
-        dgvSectors.Dock = DockStyle.Fill;
-        dgvSectors.ReadOnly = true;
-        dgvSectors.AllowUserToAddRows = false;
-        dgvSectors.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill;
-        dgvSectors.SelectionMode = DataGridViewSelectionMode.FullRowSelect;
-        dgvSectors.Columns.Add("Lba", "LBA");
-        dgvSectors.Columns.Add("Status", "Status");
-        dgvSectors.Columns.Add("HasData", "Data");
-        dgvSectors.Columns.Add("ReceivedAt", "Received");
-
-        bottomSplit.Panel1.Controls.Add(txtLog);
-        bottomSplit.Panel2.Controls.Add(dgvSectors);
-
         mainLayout.Controls.Add(connPanel, 0, 0);
         mainLayout.Controls.Add(ctrlPanel, 0, 1);
         mainLayout.Controls.Add(cfgPanel, 0, 2);
         mainLayout.Controls.Add(progPanel, 0, 3);
-        mainLayout.Controls.Add(bottomSplit, 0, 4);
+        mainLayout.Controls.Add(txtLog, 0, 4);
 
         Controls.Add(mainLayout);
 
@@ -194,11 +192,6 @@ partial class MainForm
         MinimumSize = new Size(700, 500);
         Text = "HDD Saver 3.1";
 
-        ((System.ComponentModel.ISupportInitialize)bottomSplit).EndInit();
-        bottomSplit.Panel1.ResumeLayout(false);
-        bottomSplit.Panel2.ResumeLayout(false);
-        bottomSplit.ResumeLayout(false);
-        ((System.ComponentModel.ISupportInitialize)dgvSectors).EndInit();
         mainLayout.ResumeLayout(false);
         connPanel.ResumeLayout(false);
         connPanel.PerformLayout();
@@ -222,12 +215,16 @@ partial class MainForm
     private Button btnSeek;
     private Button btnPing;
     private Button btnStatus;
-    private ComboBox cmbHeadMask;
+    private CheckBox chkHead0;
+    private CheckBox chkHead1;
+    private CheckBox chkHead2;
+    private CheckBox chkHead3;
+    private CheckBox chkHead4;
+    private CheckBox chkHead5;
     private Button btnApplyConfig;
     private Label lblProgress;
     private Label lblSectorsReceived;
     private Label lblErrors;
     private Label lblStatus;
     private TextBox txtLog;
-    private DataGridView dgvSectors;
 }

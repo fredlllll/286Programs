@@ -10,6 +10,7 @@ public partial class MainForm : Form
 {
     private readonly SerialReceiver _receiver = new();
     private System.Windows.Forms.Timer _progressTimer;
+    private const int MaxLogLines = 1000;
 
     public MainForm()
     {
@@ -82,6 +83,18 @@ public partial class MainForm : Form
         btnApplyConfig.Enabled = enabled;
     }
 
+    private byte GetHeadMask()
+    {
+        byte mask = 0;
+        if (chkHead0.Checked) mask |= 0x01;
+        if (chkHead1.Checked) mask |= 0x02;
+        if (chkHead2.Checked) mask |= 0x04;
+        if (chkHead3.Checked) mask |= 0x08;
+        if (chkHead4.Checked) mask |= 0x10;
+        if (chkHead5.Checked) mask |= 0x20;
+        return mask;
+    }
+
     private async Task StartDump()
     {
         await _receiver.StartDump();
@@ -130,10 +143,8 @@ public partial class MainForm : Form
 
     private async Task ApplyConfig()
     {
-        if (byte.TryParse(cmbHeadMask.Text, System.Globalization.NumberStyles.HexNumber, null, out byte mask))
-        {
-            await _receiver.SetHeadMask(mask);
-        }
+        var mask = GetHeadMask();
+        await _receiver.SetHeadMask(mask);
     }
 
     private async Task RefreshProgress()
@@ -159,6 +170,15 @@ public partial class MainForm : Form
     {
         var timestamp = DateTime.Now.ToString("HH:mm:ss");
         txtLog.AppendText($"[{timestamp}] {message}\r\n");
+
+        // Cap line count to avoid memory growth
+        var lines = txtLog.Lines;
+        if (lines.Length > MaxLogLines)
+        {
+            txtLog.Text = string.Join("\r\n", lines.Skip(lines.Length - MaxLogLines));
+            txtLog.SelectionStart = txtLog.TextLength;
+            txtLog.ScrollToCaret();
+        }
     }
 
     protected override void OnFormClosing(FormClosingEventArgs e)
