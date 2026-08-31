@@ -1,39 +1,11 @@
 /* serial ping-pong test: waits for "ping" on COM1, replies "pong".
-   self-contained, runs barebones from floppy - no dos, no runtime.
-   uses direct uart port I/O for diagnostics, bios int 14h for i/o. */
+   runs barebones from floppy - no dos, no runtime.
+   uses direct uart port I/O for diagnostics. */
 
 #include "intdef.h"
+#include "print.h"
 
-#pragma aux printChar = \
-    "mov ah, 0x0e"   \
-    "int 0x10"       \
-    modify [ah]      \
-    parm   [al][bx]
-
-void printChar(uint8_t ch, uint16_t pageAndColor);
-
-static void print(const char* s){
-  while(*s){
-    printChar(*s, 1);
-    s++;
-  }
-}
-
-static char* hexAlphabet = "0123456789ABCDEF";
-
-static void printHex(uint8_t v){
-  printChar(hexAlphabet[v >> 4], 1);
-  printChar(hexAlphabet[v & 0x0F], 1);
-}
-
-static void printHexShort(uint16_t v){
-  printHex(v >> 8);
-  printHex(v & 0xFF);
-}
-
-/* direct uart register access. COM1 base = 0x3F8.
-   bios int 14h works on most machines but gives poor diagnostics.
-   direct port I/O lets us see exactly what the hardware is doing. */
+/* direct uart register access. COM1 base = 0x3F8. */
 #define UART_BASE 0x3F8
 #define UART_RBR  (UART_BASE + 0)  /* receive buffer (read)  */
 #define UART_THR  (UART_BASE + 0)  /* transmit hold  (write) */
