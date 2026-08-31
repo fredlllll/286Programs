@@ -45,7 +45,7 @@ static uint8_t sectorBuf[DATA_SIZE];
 static uint8_t paused = 1;
 
 /* wait for a command from the pc. returns the command byte, or 0 if
-   nothing received within timeout */
+   nothing received within timeout. 0 = wait forever */
 static uint8_t waitForCommand(uint32_t timeoutTicks){
   uint32_t start;
   uint8_t cmd;
@@ -54,7 +54,7 @@ static uint8_t waitForCommand(uint32_t timeoutTicks){
   while(1){
     cmd = recvCommand(UART_COM1);
     if(cmd) return cmd;
-    if(biosTicks() - start > timeoutTicks) return 0;
+    if(timeoutTicks && biosTicks() - start > timeoutTicks) return 0;
   }
 }
 

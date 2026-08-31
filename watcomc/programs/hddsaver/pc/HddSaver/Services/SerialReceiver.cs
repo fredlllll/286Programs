@@ -11,7 +11,6 @@ public class SerialReceiver : IDisposable
     private SerialPort? _port;
     private CancellationTokenSource? _cts;
     private Task? _readTask;
-    private DumpSession? _currentSession;
 
     public event Action<string>? Log;
     public event Action<uint, byte, bool>? SectorReceived;
@@ -63,7 +62,6 @@ public class SerialReceiver : IDisposable
     public async Task Ping()
     {
         await SendCommand(Command.PING);
-        // Read reply
         await Task.Run(() =>
         {
             var buf = new byte[1];
@@ -78,23 +76,14 @@ public class SerialReceiver : IDisposable
     public async Task StartDump()
     {
         using var ctx = new HddSaverContext();
-        ctx.Database.EnsureCreated();
-
-        _currentSession = new DumpSession
-        {
-            StartTime = DateTime.Now,
-            TotalSectors = 0,
-            Geometry = ""
-        };
-        ctx.Sessions.Add(_currentSession);
-        await ctx.SaveChangesAsync();
+        ctx.Database.Migrate();
 
         _sectorsReceived = 0;
         _errors = 0;
         IsReceiving = true;
         _port?.DiscardInBuffer();
         await SendCommand(Command.START);
-        Log?.Invoke($"Session #{_currentSession.Id} started");
+        Log?.Invoke("Dump started");
         StartReading();
     }
 
@@ -155,7 +144,6 @@ public class SerialReceiver : IDisposable
                 if (!SectorHeader.TryParse(headerBuf, out var header, out var error))
                 {
                     Log?.Invoke($"Header error: {error}");
-                    // Send NAK
                     await SendCommand(Command.NAK);
                     _errors++;
                     continue;
@@ -176,10 +164,7 @@ public class SerialReceiver : IDisposable
                     }
                 }
 
-                // Save to database
                 await SaveSector(header, data);
-
-                // Send ACK
                 await SendCommand(Command.ACK);
 
                 _sectorsReceived++;
@@ -217,12 +202,9 @@ public class SerialReceiver : IDisposable
 
     private async Task SaveSector(SectorHeader header, byte[]? data)
     {
-        if (_currentSession == null) return;
-
         using var ctx = new HddSaverContext();
         var sector = new Sector
         {
-            SessionId = _currentSession.Id,
             Lba = header.Lba,
             Status = header.Status,
             Data = data,

@@ -32,6 +32,7 @@ partial class MainForm
         chkHead4 = new CheckBox();
         chkHead5 = new CheckBox();
         btnApplyConfig = new Button();
+        btnBadMap = new Button();
         lblProgress = new Label();
         lblSectorsReceived = new Label();
         lblErrors = new Label();
@@ -111,10 +112,13 @@ partial class MainForm
         btnStatus.Width = 60;
         btnStatus.Enabled = false;
         btnStatus.Click += btnStatus_Click;
+        btnBadMap.Text = "Bad Map";
+        btnBadMap.Width = 80;
+        btnBadMap.Click += btnBadMap_Click;
         lblSeekLba.Text = "Seek LBA:";
         lblSeekLba.AutoSize = true;
         lblSeekLba.Margin = new Padding(10, 6, 0, 0);
-        ctrlPanel.Controls.AddRange(new Control[] { btnStart, btnStop, lblSeekLba, txtSeekLba, btnSeek, btnPing, btnStatus });
+        ctrlPanel.Controls.AddRange(new Control[] { btnStart, btnStop, lblSeekLba, txtSeekLba, btnSeek, btnPing, btnStatus, btnBadMap });
 
         // cfgPanel
         cfgPanel.Dock = DockStyle.Fill;
@@ -215,6 +219,7 @@ partial class MainForm
     private Button btnSeek;
     private Button btnPing;
     private Button btnStatus;
+    private Button btnBadMap;
     private CheckBox chkHead0;
     private CheckBox chkHead1;
     private CheckBox chkHead2;

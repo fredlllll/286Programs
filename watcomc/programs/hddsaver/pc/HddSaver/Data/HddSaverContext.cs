@@ -5,7 +5,6 @@ namespace HddSaver.Data;
 
 public class HddSaverContext : DbContext
 {
-    public DbSet<DumpSession> Sessions => Set<DumpSession>();
     public DbSet<Sector> Sectors => Set<Sector>();
 
     protected override void OnConfiguring(DbContextOptionsBuilder options)
@@ -16,10 +15,6 @@ public class HddSaverContext : DbContext
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
-        modelBuilder.Entity<Sector>()
-            .HasIndex(s => new { s.SessionId, s.Lba })
-            .IsUnique();
-
         modelBuilder.Entity<Sector>()
             .Property(s => s.Data)
             .HasColumnType("BLOB");

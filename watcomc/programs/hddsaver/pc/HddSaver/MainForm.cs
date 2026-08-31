@@ -44,6 +44,7 @@ public partial class MainForm : Form
     private async void btnPing_Click(object? sender, EventArgs e) => await PingDevice();
     private async void btnStatus_Click(object? sender, EventArgs e) => await QueryStatus();
     private async void btnApplyConfig_Click(object? sender, EventArgs e) => await ApplyConfig();
+    private void btnBadMap_Click(object? sender, EventArgs e) => GenerateBadMap();
 
     private async Task ToggleConnection()
     {
@@ -147,21 +148,39 @@ public partial class MainForm : Form
         await _receiver.SetHeadMask(mask);
     }
 
+    private void GenerateBadMap()
+    {
+        using var dlg = new SaveFileDialog
+        {
+            Filter = "SVG files (*.svg)|*.svg",
+            DefaultExt = "svg",
+            FileName = "badmap.svg"
+        };
+        if (dlg.ShowDialog() != DialogResult.OK) return;
+
+        try
+        {
+            // Tandon geometry: 820 cyl, 6 heads, 26 spt
+            BadMapGenerator.Generate(dlg.FileName, 820, 6, 26);
+            AppendLog($"Bad map saved to {dlg.FileName}");
+        }
+        catch (Exception ex)
+        {
+            AppendLog($"Bad map failed: {ex.Message}");
+        }
+    }
+
     private async Task RefreshProgress()
     {
         if (!_receiver.IsConnected) return;
         try
         {
             using var ctx = new HddSaverContext();
-            var session = ctx.Sessions.OrderByDescending(s => s.Id).FirstOrDefault();
-            if (session != null)
-            {
-                var count = ctx.Sectors.Count(s => s.SessionId == session.Id);
-                var errors = ctx.Sectors.Count(s => s.SessionId == session.Id && s.Status != 0 && s.Status != 0x11);
-                lblProgress.Text = $"Session #{session.Id}: {count} sectors";
-                lblSectorsReceived.Text = $"Received: {count}";
-                lblErrors.Text = $"Errors: {errors}";
-            }
+            var count = ctx.Sectors.Count();
+            var errors = ctx.Sectors.Count(s => s.Status != 0 && s.Status != 0x11);
+            lblProgress.Text = $"Sectors: {count}";
+            lblSectorsReceived.Text = $"Received: {count}";
+            lblErrors.Text = $"Errors: {errors}";
         }
         catch { }
     }
