@@ -148,10 +148,14 @@ def build_program(config):
     print("sources: " + ", ".join(n + ".c" for n in names) + "\r\n")
 
     # compile stdlib if needed
+    stdlib_names = []
     if stdlib_dir:
         stdlib_wcc = make_wcc_flags(stdlib_dir)
-        silent_remove(os.path.join(obj_dir, "print.obj"))
-        compile_source("print", stdlib_dir, stdlib_wcc, obj_dir)
+        stdlib_names = list_sources(stdlib_dir)
+        for n in stdlib_names:
+            silent_remove(os.path.join(obj_dir, n + ".obj"))
+        for n in stdlib_names:
+            compile_source(n, stdlib_dir, stdlib_wcc, obj_dir)
 
     # compile program sources
     for n in names:
@@ -160,7 +164,7 @@ def build_program(config):
         compile_source(n, source_dir, wcc_flags, obj_dir)
 
     # link
-    all_names = names + (["print"] if stdlib_dir else [])
+    all_names = names + stdlib_names
     link_main(all_names, obj_dir, wcc_flags, arena_seg)
 
     # build bootloader and final image

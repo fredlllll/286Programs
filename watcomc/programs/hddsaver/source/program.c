@@ -335,7 +335,7 @@ void processFloppy(void)
         addDescriptor(hddPos.lba, status);
         advanceHddPosition();
         progressLine();
-        printEta(biosTicks() - diskStartTicks, floppyPosition.lba);
+        printEta(biosTicks() - diskStartTicks, floppyPosition.lba, FLOPPY_TOTAL_SECTORS);
     }
     if (currentDescriptorHeader.count > 0)
     {

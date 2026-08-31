@@ -12,7 +12,6 @@
    self contained replacements */
 
 #include "math.h"
-#include "definitions.h"
 #include "intdef.h"
 
 /* classic shift-and-add multiplication, the way you would do it on
