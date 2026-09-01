@@ -6,8 +6,7 @@ volatile uint16_t head = 0;
 volatile uint16_t tail = 0;
 
 // Far pointer directly to Vector 0x0C in the IVT (0x0000:0x0030)
-#define COM1_IVT_PTR ((isrPtr __far *)MK_FP(0x0000, 0x0030))
-isrPtr __far old_com1_isr;
+uint32_t old_com1_isr;
 
 // Interrupt Service Routine
 void __interrupt __far com1Isr(void)
@@ -37,10 +36,10 @@ void initUartAndIrq(uint16_t divisor)
   disableInterrupts();
 
   // 1. Hook IVT Vector 0x0C directly
-  old_com1_isr = *COM1_IVT_PTR;
+  old_com1_isr = readFar(0x0000, 0x0030);
 
-    // 2. Set new vector to our ISR
-  *COM1_IVT_PTR = com1Isr;
+  // 2. Set new vector to our ISR
+  writeFar(0x0000, 0x0030, &com1Isr); // TODO: does this actually give us a 32 bit address?
 
   // 2. Set Baud Rate (Enable DLAB = 0x80)
   out8(LCR, 0x80);
@@ -81,7 +80,7 @@ void cleanupUartAndIrq(void)
   out8(MCR, 0x00);
 
   // Restore original IVT entry
-  *COM1_IVT_PTR = old_com1_isr;
+  writeFar(0x0000, 0x0030, old_com1_isr);
 
   enableInterrupts();
 }

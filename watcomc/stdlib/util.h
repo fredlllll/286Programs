@@ -45,7 +45,7 @@ void halt(void);
    real-mode memory. use these instead of __far pointer casts when
    you need to manipulate IVT entries or other far-pointer-sized
    data in memory directly. */
-uint32_t read_far_ptr(uint16_t seg, uint16_t off);
-void write_far_ptr(uint16_t seg, uint16_t off, uint32_t ptr);
+uint32_t readFar(uint16_t seg, uint16_t off);
+void writeFar(uint16_t seg, uint16_t off, uint32_t ptr);
 
 #endif

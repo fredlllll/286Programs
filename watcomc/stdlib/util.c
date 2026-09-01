@@ -122,43 +122,45 @@ void halt(void){
 
 /* read a 32-bit far pointer (offset:segment, little-endian) from
    real-mode memory at seg:off. returns (segment << 16) | offset. */
-uint32_t read_far_ptr(uint16_t segVal, uint16_t off){
-  uint16_t ptr_off;
-  uint16_t ptr_seg;
+uint32_t readFar(uint16_t segVal, uint16_t off){
+  uint16_t low;
+  uint16_t high;
   _asm{
-    push es
+    push ds
     pushf
     cli
     mov ax, segVal
-    mov es, ax
-    mov bx, off
-    mov ax, es:[bx]
-    mov ptr_off, ax
-    mov ax, es:[bx+2]
-    mov ptr_seg, ax
+    mov ds, ax ; set segment
+    mov bx, off ; load address
+    mov ax, [bx] ; load lower half
+    mov low, ax ; move to output variable
+    add bx, 2 ; change addres to point to upper half
+    mov ax, [bx] ; load upper half
+    mov high, ax ; move to output variable
     popf
-    pop es
+    pop ds
   };
-  return ((uint32_t)ptr_seg << 16) | ptr_off;
+  return ((uint32_t)high << 16) | low;
 }
 
 /* write a 32-bit far pointer (offset:segment, little-endian) to
    real-mode memory at seg:off. ptrVal is (segment << 16) | offset. */
-void write_far_ptr(uint16_t segVal, uint16_t off, uint32_t ptrVal){
-  uint16_t lo = (uint16_t)ptrVal;
-  uint16_t hi = (uint16_t)(ptrVal >> 16);
+void writeFar(uint16_t segVal, uint16_t off, uint32_t ptrVal){
+  uint16_t low = (uint16_t)ptrVal;
+  uint16_t high = (uint16_t)(ptrVal >> 16);
   _asm{
-    push es
+    push ds
     pushf
     cli
-    mov ax, segVal
-    mov es, ax
-    mov bx, off
-    mov ax, lo
-    mov es:[bx], ax
-    mov ax, hi
-    mov es:[bx+2], ax
+    mov ax, segVal 
+    mov ds, ax ; set data segment
+    mov bx, off ; load address
+    mov ax, low ; load lower half
+    mov [bx], ax ; write lower half
+    mov ax, high ; load upper half
+    add bx,2 
+    mov [bx], ax ; write upper half
     popf
-    pop es
+    pop ds
   };
 }
