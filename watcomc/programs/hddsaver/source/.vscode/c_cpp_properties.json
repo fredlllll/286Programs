@@ -3,7 +3,8 @@
         {
             "name": "Watcom 286",
             "includePath": [
-                "${workspaceFolder}/source"
+                "${workspaceFolder}",
+                "${workspaceFolder}/../../../stdlib"
             ],
             "defines": [
                 "__far=",

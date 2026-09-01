@@ -3,7 +3,22 @@
 #include "util.h"
 #include "math.h"
 
-#define UART_BASE UART_COM1
+bool ExpectAck(void){
+  int16_t tmp;
+  tmp = waitForCommand(1 SECONDS);
+  if(tmp == RESP_ACK){
+    return TRUE;
+  }
+  return FALSE;
+}
+
+void Ack(){
+  uartTxBlocking(RESP_ACK);
+}
+
+void NAck(){
+  uartTxBlocking(RESP_NACK);
+}
 
 void sendSectorHeaderOnly(uint32_t lba, uint8_t status){
   struct SectorHeader hdr;
@@ -19,7 +34,7 @@ void sendSectorHeaderOnly(uint32_t lba, uint8_t status){
     hdr.headerCRC[0] = (uint8_t)(hcrc & 0xFF);
     hdr.headerCRC[1] = (uint8_t)((hcrc >> 8) & 0xFF);
   }
-  uartSendBlock(UART_BASE, (uint8_t*)&hdr, HEADER_SIZE);
+  uartSendBlock((uint8_t*)&hdr, HEADER_SIZE);
 }
 
 void sendSectorPacket(uint32_t lba, uint8_t status, const uint8_t *data){
@@ -44,45 +59,13 @@ void sendSectorPacket(uint32_t lba, uint8_t status, const uint8_t *data){
   }
 
   /* send header then data */
-  uartSendBlock(UART_BASE, (uint8_t*)&hdr, HEADER_SIZE);
-  uartSendBlock(UART_BASE, data, DATA_SIZE);
+  uartSendBlock((uint8_t*)&hdr, HEADER_SIZE);
+  uartSendBlock(data, DATA_SIZE);
 }
 
-void sendResponse(uint16_t base, uint8_t resp){
-  uartTx(base, resp);
-}
 
-uint8_t peekByte(uint16_t base){
-  if(uartRxReady(base)){
-    return uartRx(base);
-  }
-  return 0xFF;
-}
 
-uint8_t recvCommand(uint16_t base){
-  if(uartRxReady(base)){
-    return uartRx(base);
-  }
-  return 0;
-}
-
-uint8_t recvBlockTimeout(uint16_t base, uint8_t *buf, uint16_t len, uint32_t timeoutTicks){
-  uint16_t i = 0;
-  uint32_t start = biosTicks();
-  while(i < len){
-    if(uartRxReady(base)){
-      buf[i] = uartRx(base);
-      i++;
-    } else {
-      if(biosTicks() - start > timeoutTicks){
-        return 0; /* timeout */
-      }
-    }
-  }
-  return 1; /* success */
-}
-
-void sendStatusReply(uint16_t base, const struct Geometry *geom,
+void sendStatusReply(const struct Geometry *geom,
                      uint32_t currentLba, uint8_t headMask, uint8_t retries){
   struct StatusReply rep;
   uint16_t rcrc;
@@ -105,5 +88,27 @@ void sendStatusReply(uint16_t base, const struct Geometry *geom,
   rep.replyCRC[0] = (uint8_t)(rcrc & 0xFF);
   rep.replyCRC[1] = (uint8_t)((rcrc >> 8) & 0xFF);
 
-  uartSendBlock(base, (uint8_t*)&rep, sizeof(rep));
+  uartSendBlock((uint8_t*)&rep, sizeof(rep));
+}
+
+/* wait for a command from the pc. returns the command byte, or -1 if
+   nothing received within timeout. -1 = wait forever */
+int16_t waitForCommand(int32_t timeoutTicks)
+{
+  uint32_t start;
+  int16_t cmd;
+
+  start = biosTicks();
+  while (1)
+  {
+    cmd = uartRx();
+    if (cmd != -1)
+    {
+      return (uint8_t)cmd;
+    }
+    if (timeoutTicks >= 0 && biosTicks() - start > timeoutTicks)
+    {
+      return -1;
+    }
+  }
 }

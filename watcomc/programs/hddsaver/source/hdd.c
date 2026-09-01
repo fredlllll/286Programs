@@ -68,7 +68,7 @@ uint8_t readHddResilient(void __far *dest)
     printDecLong(hddPos.lba);
     print(" Status: ");
     printInt13Status(status);
-    print("\r");
+    print("\r\n");
   }
 
   return status;

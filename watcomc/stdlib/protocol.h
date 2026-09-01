@@ -33,9 +33,8 @@
 #define CMD_BAUD_RATE   0x12
 
 /* response bytes from 286 to PC */
-#define RESP_READY      0x06
 #define RESP_ACK        0x06
-#define RESP_NAK        0x15
+#define RESP_NACK        0x15
 
 /* header magic bytes */
 #define HEADER_MAGIC0   0xAA
@@ -79,21 +78,17 @@ void sendSectorPacket(uint32_t lba, uint8_t status, const uint8_t *data);
 /* send header only (for failed/skipped sectors) */
 void sendSectorHeaderOnly(uint32_t lba, uint8_t status);
 
-/* send a single byte response (READY, ACK, NAK) */
-void sendResponse(uint16_t base, uint8_t resp);
-
-/* receive a command byte. returns 0 if no command available,
-   otherwise the command byte (CMD_*) */
-uint8_t recvCommand(uint16_t base);
-
-/* receive a block of bytes with timeout. returns 1 on success, 0 on timeout */
-uint8_t recvBlockTimeout(uint16_t base, uint8_t *buf, uint16_t len, uint32_t timeoutTicks);
 
 /* send status reply packet */
-void sendStatusReply(uint16_t base, const struct Geometry *geom,
+void sendStatusReply(const struct Geometry *geom,
                      uint32_t currentLba, uint8_t headMask, uint8_t retries);
 
 /* peek at next byte without consuming. returns 0xFF if nothing available */
-uint8_t peekByte(uint16_t base);
+uint8_t peekByte();
+
+void Ack(void);
+void NAck(void);
+bool ExpectAck(void);
+int16_t waitForCommand(int32_t timeoutTicks);
 
 #endif

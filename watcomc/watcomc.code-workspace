@@ -1,0 +1,23 @@
+{
+	"folders": [
+		{
+			"path": "programs/hddsaver/source"
+		},
+		{
+			"path": "stdlib"
+		}
+	],
+	"settings": {
+		"C_Cpp.default.cppStandard": "c++98",
+		"C_Cpp.default.cStandard": "c89",
+		"C_Cpp.default.defines": [
+			"__interrupt=",
+			"__far=",
+			"__near=",
+			"__cdecl=",
+			"__watcall="
+		],
+		"C_Cpp.default.intelliSenseMode": "windows-gcc-x86",
+		"C_Cpp.default.compilerPath": "C:\\WATCOM\\binnt64\\wcc.exe"
+	}
+}

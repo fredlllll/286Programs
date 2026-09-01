@@ -25,14 +25,11 @@ void main(void){
   crcInit();
 
   /* initialize uart: 9600 baud, 8N1 */
-  uartInit(UART_COM1, 12);
-  uartFlushRx(UART_COM1);
-
-  /* print to screen only - no serial hello to avoid polluting receive buffer */
-  print("hdd saver 3.1\r\n");
-  print("serial: 9600 8N1\r\n");
+  initUartAndIrq(12);
+  uartFlushRx();
 
   /* run the main program */
   program();
+  halt();
 }
 #pragma code_seg ()

@@ -4,6 +4,12 @@
 #define UTIL_H
 #include "intdef.h"
 
+#define SECONDS * 18
+
+// Function pointer typedef for Real Mode 16-bit ISRs
+typedef void(__interrupt __far *isrPtr)(void);
+#define MK_FP(seg, off) ((void __far *)(((unsigned long)(seg) << 16) | (unsigned short)(off)))
+
 /* store a 16/24/32 bit value into a byte buffer, least significant
    byte first ("little endian", the native byte order of x86 and of
    the on-disk header format). see util.c for why this exists.

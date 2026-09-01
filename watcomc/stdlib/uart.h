@@ -3,39 +3,52 @@
 #ifndef UART_H
 #define UART_H
 #include "intdef.h"
+#include "inout.h"
+#include "int.h"
+#include "util.h"
 
-#define UART_COM1 0x3F8
-#define UART_COM2 0x2F8
+#define COM1_BASE   0x3F8
+#define RX_DATA     (COM1_BASE + 0)
+#define IER         (COM1_BASE + 1)
+#define LCR         (COM1_BASE + 3)
+#define MCR         (COM1_BASE + 4)
+#define LSR         (COM1_BASE + 5)
+
+#define PIC1_CMD    0x20
+#define PIC1_DATA   0x21
+#define IRQ4_MASK   0x10  // Bit 4
+
+#define RING_BUF_SIZE 1024
 
 /* initialize uart: set baud rate divisor, 8N1, disable interrupts,
    enable DTR/RTS. divisor = 115200 / baud_rate (e.g. 12 = 9600) */
-void uartInit(uint16_t base, uint16_t divisor);
+void initUartAndIrq(uint16_t divisor);
 
-/* set baud rate via divisor latch. call after uartInit to change speed */
-void uartSetBaud(uint16_t base, uint16_t divisor);
+void cleanupUartAndIrq(void);
 
 /* blocking transmit: waits for THR empty, then sends byte */
-void uartTx(uint16_t base, uint8_t ch);
+void uartTxBlocking(uint8_t c);
 
-/* blocking receive: waits for data ready, then returns byte */
-uint8_t uartRx(uint16_t base);
+/* nonblocking receive: returns -1 if no data present */
+int16_t uartRx(void);
+/* blocking receive: waits till data present and returns byte */
+uint8_t uartRxBlocking();
 
 /* poll: returns 1 if a byte is available in the receive buffer */
-uint8_t uartRxReady(uint16_t base);
+bool uartRxReady();
 
 /* poll: returns 1 if THR is empty (can transmit) */
-uint8_t uartTxReady(uint16_t base);
+bool uartTxReady();
 
 /* send a block of bytes */
-void uartSendBlock(uint16_t base, const uint8_t *data, uint16_t len);
+void uartSendBlock(const uint8_t *data, uint16_t len);
 
 /* receive a block of bytes */
-void uartRecvBlock(uint16_t base, uint8_t *data, uint16_t len);
+void uartRecvBlock(uint8_t *data, uint16_t len);
+
+uint8_t uartRecvBlockTimeout(uint8_t *buf, uint16_t len, uint32_t timeoutTicks);
 
 /* flush receive buffer: discard all pending bytes */
-void uartFlushRx(uint16_t base);
-
-/* detect uart type: 0=unknown, 1=8250/16450, 2=16550+ */
-uint8_t uartDetect(uint16_t base);
+void uartFlushRx();
 
 #endif
