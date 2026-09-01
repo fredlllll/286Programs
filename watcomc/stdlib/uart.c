@@ -8,26 +8,51 @@ volatile uint16_t tail = 0;
 // Far pointer directly to Vector 0x0C in the IVT (0x0000:0x0030)
 uint32_t old_com1_isr;
 
-// Interrupt Service Routine
-void __interrupt __far com1Isr(void)
+/* the real work — an ordinary near function, NOT __interrupt.
+   its address is a plain 2-byte offset, so taking &com1Isr below
+   needs no segment relocation. */
+void com1IsrBody(void)
 {
-  // Read byte to clear the UART interrupt flag
   uint8_t b = in8(RX_DATA);
 
-  // Push into ring buffer
   uint16_t next_head = (head + 1) % RING_BUF_SIZE;
   if (next_head != tail)
   {
     ringBuf[head] = b;
     head = next_head;
   }
-  else
-  {
-    // buffer full, throwing away input
-  }
 
-  // Acknowledge interrupt to the 8259 Master PIC (EOI)
   out8(PIC1_CMD, 0x20);
+}
+
+/* hand-written trampoline: this is what actually sits in the IVT.
+   entered via hardware INT (which pushes FLAGS/CS/IP for us), so we
+   only need to save/restore the registers ourselves and end with
+   iret. no __interrupt keyword -> no forced far-ness. */
+void __declspec(naked) com1Isr(void)
+{
+  __asm {
+    push ax
+    push bx
+    push cx
+    push dx
+    push si
+    push di
+    push bp
+    push ds
+    push es
+    call com1IsrBody
+    pop  es
+    pop  ds
+    pop  bp
+    pop  di
+    pop  si
+    pop  dx
+    pop  cx
+    pop  bx
+    pop  ax
+    iret
+  }
 }
 
 void initUartAndIrq(uint16_t divisor)
@@ -39,7 +64,7 @@ void initUartAndIrq(uint16_t divisor)
   old_com1_isr = readFar(0x0000, 0x0030);
 
   // 2. Set new vector to our ISR
-  writeFar(0x0000, 0x0030, &com1Isr); // TODO: does this actually give us a 32 bit address?
+  writeFar(0x0000, 0x0030, (uint32_t)(uint16_t)&com1Isr); // near pointer but we are in segment 0 anyway
 
   // 2. Set Baud Rate (Enable DLAB = 0x80)
   out8(LCR, 0x80);

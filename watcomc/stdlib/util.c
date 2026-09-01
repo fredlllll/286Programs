@@ -120,8 +120,7 @@ void halt(void){
   }
 }
 
-/* read a 32-bit far pointer (offset:segment, little-endian) from
-   real-mode memory at seg:off. returns (segment << 16) | offset. */
+/*
 uint32_t readFar(uint16_t segVal, uint16_t off){
   uint16_t low;
   uint16_t high;
@@ -143,8 +142,7 @@ uint32_t readFar(uint16_t segVal, uint16_t off){
   return ((uint32_t)high << 16) | low;
 }
 
-/* write a 32-bit far pointer (offset:segment, little-endian) to
-   real-mode memory at seg:off. ptrVal is (segment << 16) | offset. */
+
 void writeFar(uint16_t segVal, uint16_t off, uint32_t ptrVal){
   uint16_t low = (uint16_t)ptrVal;
   uint16_t high = (uint16_t)(ptrVal >> 16);
@@ -163,4 +161,16 @@ void writeFar(uint16_t segVal, uint16_t off, uint32_t ptrVal){
     popf
     pop ds
   };
+}*/
+
+/* read/write a 32-bit far pointer (segment:offset) stored in real-mode
+   memory, e.g. an IVT entry. value format: (segment << 16) | offset,
+   matching MK_FP. caller is expected to have interrupts disabled
+   already when touching the IVT. */
+uint32_t readFar(uint16_t seg, uint16_t off){
+  return *(uint32_t __far *)MK_FP(seg, off);
+}
+
+void writeFar(uint16_t seg, uint16_t off, uint32_t ptr){
+  *(uint32_t __far *)MK_FP(seg, off) = ptr;
 }

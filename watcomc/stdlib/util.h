@@ -41,10 +41,9 @@ uint32_t biosTicks(void);
 
 void halt(void);
 
-/* read/write 32-bit far pointers (segment:offset) from arbitrary
-   real-mode memory. use these instead of __far pointer casts when
-   you need to manipulate IVT entries or other far-pointer-sized
-   data in memory directly. */
+/* read/write a 32-bit far pointer (segment:offset) from arbitrary
+   real-mode memory. thin wrapper around a far pointer dereference,
+   useful for IVT entries and similar fixed absolute addresses. */
 uint32_t readFar(uint16_t seg, uint16_t off);
 void writeFar(uint16_t seg, uint16_t off, uint32_t ptr);
 
