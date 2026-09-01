@@ -20,4 +20,5 @@ public static class Command
 
     public const int HeaderSize = 10;
     public const int DataSize = 512;
+    public const int StatusReplySize = 22;
 }

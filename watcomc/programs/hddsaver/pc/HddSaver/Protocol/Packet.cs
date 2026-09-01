@@ -108,3 +108,54 @@ public class SectorHeader
         return table;
     }
 }
+
+public class StatusReply
+{
+    public ushort TotalCyls { get; set; }
+    public byte TotalHeads { get; set; }
+    public byte TotalSpt { get; set; }
+    public uint TotalSectors { get; set; }
+    public uint CurrentLba { get; set; }
+    public byte HeadMask { get; set; }
+    public byte Retries { get; set; }
+
+    public static bool TryParse(ReadOnlySpan<byte> data, out StatusReply? result, out string? error)
+    {
+        result = null;
+        error = null;
+
+        if (data.Length < Command.StatusReplySize)
+        {
+            error = "Status reply too short";
+            return false;
+        }
+
+        if (data[0] != Command.HEADER_MAGIC0 || data[1] != Command.HEADER_MAGIC1)
+        {
+            error = "Bad status magic";
+            return false;
+        }
+
+        var reply = new StatusReply
+        {
+            TotalCyls = (ushort)(data[2] | (data[3] << 8)),
+            TotalHeads = data[4],
+            TotalSpt = data[5],
+            TotalSectors = (uint)data[6] | ((uint)data[7] << 8) | ((uint)data[8] << 16) | ((uint)data[9] << 24),
+            CurrentLba = (uint)data[10] | ((uint)data[11] << 8) | ((uint)data[12] << 16) | ((uint)data[13] << 24),
+            HeadMask = data[14],
+            Retries = data[15]
+        };
+
+        var computedCrc = SectorHeader.Crc16(data[..20]);
+        var expectedCrc = (ushort)(data[20] | (data[21] << 8));
+        if (computedCrc != expectedCrc)
+        {
+            error = $"Status CRC mismatch: computed 0x{computedCrc:X4}, got 0x{expectedCrc:X4}";
+            return false;
+        }
+
+        result = reply;
+        return true;
+    }
+}

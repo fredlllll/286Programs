@@ -33,6 +33,11 @@ public partial class MainForm : Form
             lblSectorsReceived.Text = $"Received: {count}";
         });
         _receiver.DumpComplete += () => Invoke(() => AppendLog("Dump complete!"));
+        _receiver.StatusReceived += s => Invoke(() =>
+        {
+            lblProgress.Text = $"LBA {s.CurrentLba}/{s.TotalSectors} ({s.TotalCyls}cyl {s.TotalHeads}hd {s.TotalSpt}spt)";
+            lblSectorsReceived.Text = $"Mask: 0x{s.HeadMask:X2} Retries: {s.Retries}";
+        });
 
         _progressTimer = new System.Windows.Forms.Timer { Interval = 5000 };
         _progressTimer.Tick += async (s, e) => await RefreshProgress();

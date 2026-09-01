@@ -21,6 +21,7 @@ public class SerialReceiver : IDisposable
     public event Action<uint, string>? SectorError;
     public event Action? DumpComplete;
     public event Action<int>? ProgressChanged;
+    public event Action<StatusReply>? StatusReceived;
 
     private int _sectorsReceived;
     private int _errors;
@@ -159,35 +160,56 @@ public class SerialReceiver : IDisposable
                 var headerBuf = new byte[Command.HeaderSize];
                 await ReadExactAsync(headerBuf, ct);
 
-                if (!SectorHeader.TryParse(headerBuf, out var header, out var error))
+                if (headerBuf[0] != Command.HEADER_MAGIC0 || headerBuf[1] != Command.HEADER_MAGIC1)
                 {
-                    Log?.Invoke($"Header error: {error}");
+                    Log?.Invoke($"Bad magic: 0x{headerBuf[0]:X2} 0x{headerBuf[1]:X2}");
                     await SendCommand(Command.NAK);
                     _errors++;
                     continue;
                 }
 
-                byte[]? data = null;
-                if (header!.HasData)
+                if (SectorHeader.TryParse(headerBuf, out var header, out _))
                 {
-                    data = new byte[Command.DataSize];
-                    await ReadExactAsync(data, ct);
-
-                    if (!SectorHeader.ValidateDataCrc(data, header.DataCrc))
+                    byte[]? data = null;
+                    if (header!.HasData)
                     {
-                        Log?.Invoke($"Data CRC error for LBA {header.Lba}");
+                        data = new byte[Command.DataSize];
+                        await ReadExactAsync(data, ct);
+
+                        if (!SectorHeader.ValidateDataCrc(data, header.DataCrc))
+                        {
+                            Log?.Invoke($"Data CRC error for LBA {header.Lba}");
+                            await SendCommand(Command.NAK);
+                            _errors++;
+                            continue;
+                        }
+                    }
+
+                    await SaveSector(header, data);
+                    await SendCommand(Command.ACK);
+
+                    _sectorsReceived++;
+                    SectorReceived?.Invoke(header.Lba, header.Status, data != null);
+                    ProgressChanged?.Invoke(_sectorsReceived);
+                }
+                else
+                {
+                    var statusBuf = new byte[Command.StatusReplySize];
+                    Buffer.BlockCopy(headerBuf, 0, statusBuf, 0, Command.HeaderSize);
+                    await ReadExactAsync(statusBuf, Command.HeaderSize, Command.StatusReplySize - Command.HeaderSize, ct);
+
+                    if (StatusReply.TryParse(statusBuf, out var statusReply, out _))
+                    {
+                        StatusReceived?.Invoke(statusReply!);
+                        Log?.Invoke($"Status: {statusReply.TotalCyls}cyl {statusReply.TotalHeads}hd {statusReply.TotalSpt}spt LBA={statusReply.CurrentLba} mask=0x{statusReply.HeadMask:X2} retries={statusReply.Retries}");
+                    }
+                    else
+                    {
+                        Log?.Invoke("Header CRC mismatch");
                         await SendCommand(Command.NAK);
                         _errors++;
-                        continue;
                     }
                 }
-
-                await SaveSector(header, data);
-                await SendCommand(Command.ACK);
-
-                _sectorsReceived++;
-                SectorReceived?.Invoke(header.Lba, header.Status, data != null);
-                ProgressChanged?.Invoke(_sectorsReceived);
             }
             catch (OperationCanceledException)
             {
@@ -220,6 +242,24 @@ public class SerialReceiver : IDisposable
             if (read == 0)
                 throw new TimeoutException("Serial read timeout");
             offset += read;
+        }
+    }
+
+    private async Task ReadExactAsync(byte[] buffer, int offset, int count, CancellationToken ct)
+    {
+        int totalRead = 0;
+        while (totalRead < count)
+        {
+            ct.ThrowIfCancellationRequested();
+            int read = await Task.Run(() =>
+            {
+                try { return _stream!.Read(buffer, offset + totalRead, count - totalRead); }
+                catch (IOException) { return 0; }
+                catch (TimeoutException) { return 0; }
+            }, ct);
+            if (read == 0)
+                throw new TimeoutException("Serial read timeout");
+            totalRead += read;
         }
     }
 
