@@ -119,3 +119,46 @@ void halt(void){
     _asm{ hlt }; 
   }
 }
+
+/* read a 32-bit far pointer (offset:segment, little-endian) from
+   real-mode memory at seg:off. returns (segment << 16) | offset. */
+uint32_t read_far_ptr(uint16_t segVal, uint16_t off){
+  uint16_t ptr_off;
+  uint16_t ptr_seg;
+  _asm{
+    push es
+    pushf
+    cli
+    mov ax, segVal
+    mov es, ax
+    mov bx, off
+    mov ax, es:[bx]
+    mov ptr_off, ax
+    mov ax, es:[bx+2]
+    mov ptr_seg, ax
+    popf
+    pop es
+  };
+  return ((uint32_t)ptr_seg << 16) | ptr_off;
+}
+
+/* write a 32-bit far pointer (offset:segment, little-endian) to
+   real-mode memory at seg:off. ptrVal is (segment << 16) | offset. */
+void write_far_ptr(uint16_t segVal, uint16_t off, uint32_t ptrVal){
+  uint16_t lo = (uint16_t)ptrVal;
+  uint16_t hi = (uint16_t)(ptrVal >> 16);
+  _asm{
+    push es
+    pushf
+    cli
+    mov ax, segVal
+    mov es, ax
+    mov bx, off
+    mov ax, lo
+    mov es:[bx], ax
+    mov ax, hi
+    mov es:[bx+2], ax
+    popf
+    pop es
+  };
+}
