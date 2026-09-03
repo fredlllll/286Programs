@@ -20,13 +20,12 @@
 #include "uart.h"
 
 /* one 512 byte sector buffer. lives in dgroup like every other global */
-static uint8_t sectorBuf[DATA_SIZE];
+static uint8_t sectorBuf[512];
 static bool stopRequested;
 static uint8_t state;
 
 #define STATE_PAUSE 0
 #define STATE_RUN 1
-
 
 static void printCmd(uint8_t cmd)
 {
@@ -53,14 +52,11 @@ static void printCmd(uint8_t cmd)
   case CMD_RETRIES:
     print("[cmd] RETRIES\r\n");
     break;
-  case CMD_BAUD_RATE:
-    print("[cmd] BAUD_RATE\r\n");
+  case CMD_ACK:
+    print("[cmd] ACK\r\n");
     break;
-  case RESP_ACK:
-    print("[resp] ACK\r\n");
-    break;
-  case RESP_NACK:
-    print("[resp] NACK\r\n");
+  case CMD_NACK:
+    print("[cmd] NACK\r\n");
     break;
   default:
     print("[cmd] unknown 0x");
@@ -96,26 +92,53 @@ static void sendOneSector(void)
   advanceHddPosition();
 }
 
-/* ---- main loop ----
-   wait for pc to send start. then stream sectors until:
-   - all sectors sent (drive fully dumped)
-   - pc sends stop
-   - user presses esc
-   after stop, loop back to idle so pc can resume later */
-
+static bool verifyMagic(uint32_t timeout)
+{
+  uint8_t b;
+  b = uartRxTimeout(timeout);
+  if (b != HEADER_MAGIC0)
+  {
+    return FALSE;
+  }
+  b = uartRxTimeout(timeout);
+  if (b != HEADER_MAGIC1)
+  {
+    return FALSE;
+  }
+  return TRUE;
+}
 
 void checkCommand(uint32_t timeout)
 {
   uint8_t tmp;
   uint8_t buf[3];
-  int16_t cmd;
-  cmd = waitForCommand(timeout);
-  if (cmd < 0)
+  int16_t opcode;
+  uint32_t packetNumber;
+
+  if (!verifyMagic(timeout))
+  {
+    return;
+  }
+  opcode = uartRxTimeout(timeout);
+  if (opcode < 0)
   {
     return; // no command within timeout
   }
-  printCmd(cmd);
-  switch (cmd)
+  printCmd(opcode);
+  uartRecvBlockTimeout(&packetNumber, 4, timeout);
+  if (opcode == CMD_ACK)
+  {
+    return; // ignore
+  }
+  if (opcode == CMD_NACK)
+  {
+    print("\r\nNack for packet ");
+    printDecLong(packetNumber);
+    return; // ignore, retransmissions are too hard
+  }
+  Ack(packetNumber); // we just ack all messages
+
+  switch (opcode)
   {
   case CMD_START:
     state = STATE_RUN;
@@ -126,30 +149,38 @@ void checkCommand(uint32_t timeout)
     printDecLong(hddPos.lba);
     break;
   case CMD_PING:
-    Ack();
+    sendPong();
     break;
   case CMD_STATUS:
     sendStatusReply(&hddGeom, hddPos.lba, headMask, hddRetries);
     break;
   case CMD_HEAD_MASK:
-    if (uartRecvBlockTimeout(&tmp, 1, 18))
+  {
+    uint16_t tmp = uartRxTimeout(1 SECONDS);
+    if (tmp >= 0)
     {
-      headMask = tmp;
+      headMask = (uint8_t)tmp;
     }
-    break;
+  }
+  break;
   case CMD_RETRIES:
-    if (uartRecvBlockTimeout(&tmp, 1, 18))
+  {
+    uint16_t tmp = uartRxTimeout(1 SECONDS);
+    if (tmp >= 0)
     {
-      hddRetries = tmp;
+      hddRetries = (uint8_t)tmp;
     }
-    break;
+  }
+  break;
   case CMD_SEEK:
-    if (uartRecvBlockTimeout(buf, 3, 1 SECONDS))
+  {
+    uint32_t lba;
+    if (uartRecvBlockTimeout(&lba, sizeof(lba), 1 SECONDS))
     {
-      uint32_t lba = (uint32_t)buf[0] | ((uint32_t)buf[1] << 8) | ((uint32_t)buf[2] << 16);
       seekHdd(lba);
     }
-    break;
+  }
+  break;
   }
 }
 

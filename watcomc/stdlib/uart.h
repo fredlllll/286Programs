@@ -31,6 +31,8 @@ void uartTxBlocking(uint8_t c);
 
 /* nonblocking receive: returns -1 if no data present */
 int16_t uartRx(void);
+/* blocking receive with timeout, returns -1 if timed out*/
+int16_t uartRxTimeout(uint32_t timeoutTicks);
 /* blocking receive: waits till data present and returns byte */
 uint8_t uartRxBlocking();
 
@@ -41,12 +43,12 @@ bool uartRxReady();
 bool uartTxReady();
 
 /* send a block of bytes */
-void uartSendBlock(const uint8_t *data, uint16_t len);
+void uartSendBlock(const void *data, uint16_t len);
 
 /* receive a block of bytes */
-void uartRecvBlock(uint8_t *data, uint16_t len);
+void uartRecvBlock(void *data, uint16_t len);
 
-uint8_t uartRecvBlockTimeout(uint8_t *buf, uint16_t len, uint32_t timeoutTicks);
+bool uartRecvBlockTimeout(void *buf, uint16_t len, uint32_t timeoutTicks);
 
 /* flush receive buffer: discard all pending bytes */
 void uartFlushRx();

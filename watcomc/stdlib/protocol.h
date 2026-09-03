@@ -23,43 +23,38 @@
 #include "chs.h"
 
 /* command bytes from PC */
-#define CMD_START       0x01
-#define CMD_STOP        0x02
-#define CMD_SEEK        0x03
-#define CMD_PING        0x04
-#define CMD_STATUS      0x05
-#define CMD_HEAD_MASK   0x10
-#define CMD_RETRIES     0x11
-#define CMD_BAUD_RATE   0x12
+#define CMD_START 0x01
+#define CMD_STOP 0x02
+#define CMD_SEEK 0x03
+#define CMD_HEAD_MASK 0x04
+#define CMD_RETRIES 0x05
+#define CMD_PING 0x06
+#define CMD_PONG 0x07
+#define CMD_SEND_STATUS 0x08
+#define CMD_STATUS 0x09
+#define CMD_SECTOR 0x0a
 
-/* response bytes from 286 to PC */
-#define RESP_ACK        0x06
-#define RESP_NACK        0x15
+#define CMD_ACK 0xFE
+#define CMD_NACK 0xCC
 
 /* header magic bytes */
-#define HEADER_MAGIC0   0xAA
-#define HEADER_MAGIC1   0x55
-#define HEADER_SIZE     10
-#define DATA_SIZE       512
-#define PACKET_SIZE     (HEADER_SIZE + DATA_SIZE)  /* max packet */
+#define HEADER_MAGIC0 0xAA
+#define HEADER_MAGIC1 0x55
 
 /* sector header as it appears on the wire */
 #pragma pack(push, 1)
-struct SectorHeader {
-  uint8_t magic0;     /* 0xAA */
-  uint8_t magic1;     /* 0x55 */
-  uint8_t lba[3];     /* little-endian, 24-bit */
-  uint8_t status;     /* INT 13h code */
-  uint8_t dataCRC[2]; /* CRC-16 over data (0 if no data) */
-  uint8_t headerCRC[2]; /* CRC-16 over bytes 0..7 */
+struct SectorHeader
+{
+  uint8_t status;   /* INT 13h code */
+  uint32_t lba;     /* sector lba */
+  uint16_t dataCRC; /* CRC-16 over data (0 if no data) */
 };
 #pragma pack(pop)
 
 /* status reply packet (sent in response to CMD_STATUS) */
 #pragma pack(push, 1)
-struct StatusReply {
-  uint8_t magic0;     /* 0xAA */
-  uint8_t magic1;     /* 0x55 */
+struct StatusReply
+{
   uint16_t totalCyls;
   uint8_t totalHeads;
   uint8_t totalSpt;
@@ -67,28 +62,22 @@ struct StatusReply {
   uint32_t currentLba;
   uint8_t headMask;
   uint8_t retries;
-  uint8_t reserved[4]; /* future use */
-  uint8_t replyCRC[2];
 };
 #pragma pack(pop)
 
-/* send a sector header (always) + data (if status is good) */
-void sendSectorPacket(uint32_t lba, uint8_t status, const uint8_t *data);
+void Ack(uint32_t packetNum);
+void NAck(uint32_t packetNum);
+
+void sendPong(void);
 
 /* send header only (for failed/skipped sectors) */
 void sendSectorHeaderOnly(uint32_t lba, uint8_t status);
 
+/* send a sector header (always) + data (if status is good) */
+void sendSectorPacket(uint32_t lba, uint8_t status, const uint8_t *data);
 
 /* send status reply packet */
 void sendStatusReply(const struct Geometry *geom,
                      uint32_t currentLba, uint8_t headMask, uint8_t retries);
-
-/* peek at next byte without consuming. returns 0xFF if nothing available */
-uint8_t peekByte();
-
-void Ack(void);
-void NAck(void);
-bool ExpectAck(void);
-int16_t waitForCommand(int32_t timeoutTicks);
 
 #endif

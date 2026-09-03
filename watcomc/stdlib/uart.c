@@ -122,6 +122,28 @@ int16_t uartRx(void)
   return (int16_t)b;
 }
 
+/* wait for a command from the pc. returns the command byte, or -1 if
+   nothing received within timeout. -1 = wait forever */
+int16_t uartRxTimeout(uint32_t timeoutTicks)
+{
+  uint32_t start;
+  int16_t cmd;
+
+  start = biosTicks();
+  while (1)
+  {
+    cmd = uartRx();
+    if (cmd != -1)
+    {
+      return (uint8_t)cmd;
+    }
+    if (biosTicks() - start > timeoutTicks)
+    {
+      return -1;
+    }
+  }
+}
+
 uint8_t uartRxBlocking()
 {
   uint8_t b;
@@ -150,25 +172,25 @@ void uartTxBlocking(uint8_t c)
   out8(COM1_BASE, c);
 }
 
-void uartSendBlock(const uint8_t *data, uint16_t len)
+void uartSendBlock(const void *data, uint16_t len)
 {
   uint16_t i;
   for (i = 0; i < len; i++)
   {
-    uartTxBlocking(data[i]);
+    uartTxBlocking(((uint8_t *)data)[i]);
   }
 }
 
-void uartRecvBlock(uint8_t *data, uint16_t len)
+void uartRecvBlock(void *data, uint16_t len)
 {
   uint16_t i;
   for (i = 0; i < len; i++)
   {
-    data[i] = uartRxBlocking();
+    ((uint8_t *)data)[i] = uartRxBlocking();
   }
 }
 
-uint8_t uartRecvBlockTimeout(uint8_t *buf, uint16_t len, uint32_t timeoutTicks)
+bool uartRecvBlockTimeout(void *buf, uint16_t len, uint32_t timeoutTicks)
 {
   uint16_t i = 0;
   uint32_t start = biosTicks();
@@ -176,18 +198,15 @@ uint8_t uartRecvBlockTimeout(uint8_t *buf, uint16_t len, uint32_t timeoutTicks)
   {
     if (uartRxReady())
     {
-      buf[i] = uartRx();
+      ((uint8_t *)buf)[i] = uartRx();
       i++;
     }
-    else
+    else if (biosTicks() - start > timeoutTicks)
     {
-      if (biosTicks() - start > timeoutTicks)
-      {
-        return 0; /* timeout */
-      }
+      return FALSE; /* timeout */
     }
   }
-  return 1; /* success */
+  return TRUE; /* success */
 }
 
 void uartFlushRx()
