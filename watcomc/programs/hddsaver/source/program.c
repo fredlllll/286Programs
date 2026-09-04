@@ -80,17 +80,18 @@ static void sendOneSector(void)
   status = readHddResilient(sectorBuf);
 
   /* send header + data (if success) or header only (if failure) */
-  do
+  // dont do retransmission here, serial faults extremely unlikely, just blocks the program and is hard to implement properly
+  // do
+  //{
+  if (isStatusSuccess(status))
   {
-    if (isStatusSuccess(status))
-    {
-      sendSectorPacket(hddPos.lba, status, sectorBuf);
-    }
-    else
-    {
-      sendSectorHeaderOnly(hddPos.lba, status);
-    }
-  } while (!ExpectAck());
+    sendSectorPacket(hddPos.lba, status, sectorBuf);
+  }
+  else
+  {
+    sendSectorHeaderOnly(hddPos.lba, status);
+  }
+  //} while (!ExpectAck());
 
   advanceHddPosition();
 }
