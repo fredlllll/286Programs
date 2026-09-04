@@ -19,6 +19,7 @@ namespace HddSaver
             {
                 cmbPort.SelectedIndex = 0;
             }
+            cmbBaud.SelectedIndex = 0;
             WireEvents();
         }
 
