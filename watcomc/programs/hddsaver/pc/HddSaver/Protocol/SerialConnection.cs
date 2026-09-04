@@ -251,7 +251,7 @@ public class SerialConnection : IDisposable
     {
         try
         {
-            lock (_streamWriterLock)
+            lock (_streamReaderLock)
             {
                 byte magic = _reader.ReadByte();
                 if (magic != HEADER_MAGIC0)
