@@ -71,10 +71,10 @@ void NAck(uint32_t packetNum);
 void sendPong(void);
 
 /* send header only (for failed/skipped sectors) */
-void sendSectorHeaderOnly(uint32_t lba, uint8_t status);
+uint32_t sendSectorHeaderOnly(uint8_t status, uint32_t lba);
 
 /* send a sector header (always) + data (if status is good) */
-void sendSectorPacket(uint32_t lba, uint8_t status, const uint8_t *data);
+uint32_t sendSectorPacket(uint8_t status, uint32_t lba, const uint8_t *data);
 
 /* send status reply packet */
 void sendStatusReply(const struct Geometry *geom,

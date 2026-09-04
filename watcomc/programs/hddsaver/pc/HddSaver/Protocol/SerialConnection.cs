@@ -133,9 +133,10 @@ public class SerialConnection : IDisposable
     public void Connect(string portName, int baudRate = 9600)
     {
         Disconnect();
-        _port = new SerialPort(portName, baudRate, Parity.None, 8, StopBits.One) { 
-        WriteTimeout=5000,
-        ReadTimeout=5000
+        _port = new SerialPort(portName, baudRate, Parity.None, 8, StopBits.One)
+        {
+            WriteTimeout = 5000,
+            ReadTimeout = 5000
         };
         _port.Open();
         _stream = _port.BaseStream;
@@ -248,18 +249,25 @@ public class SerialConnection : IDisposable
 
     private bool VerifyMagic()
     {
-        lock (_streamWriterLock)
+        try
         {
-            byte magic = _reader.ReadByte();
-            if (magic != HEADER_MAGIC0)
+            lock (_streamWriterLock)
             {
-                return false;
+                byte magic = _reader.ReadByte();
+                if (magic != HEADER_MAGIC0)
+                {
+                    return false;
+                }
+                magic = _reader.ReadByte();
+                if (magic != HEADER_MAGIC1)
+                {
+                    return false;
+                }
             }
-            magic = _reader.ReadByte();
-            if (magic != HEADER_MAGIC1)
-            {
-                return false;
-            }
+        }
+        catch (TimeoutException)
+        {
+            return false; //no data came in time
         }
         return true;
     }
@@ -276,28 +284,25 @@ public class SerialConnection : IDisposable
         */
         while (_running)
         {
-            Log?.Invoke("in loop");
             try
             {
-                Log?.Invoke("in try");
                 lock (_streamReaderLock)
                 {
-                    Log?.Invoke("in lock");
                     if (!VerifyMagic())
                     {
-                        Log?.Invoke("invalid magic");
                         continue;
                     }
-                    Log?.Invoke("getting opcode");
                     var opcode = _reader.ReadOpcode();
                     uint packetNumber = _reader.ReadUInt32();
                     if (opcode == Opcode.Ack)
                     {
+                        Log?.Invoke($"ack {packetNumber}");
                         ConfirmReceived(packetNumber);
                         continue;
                     }
                     if (opcode == Opcode.Nack)
                     {
+                        Log?.Invoke($"nack {packetNumber}");
                         Retransmit(packetNumber);
                         continue;
                     }
@@ -307,6 +312,7 @@ public class SerialConnection : IDisposable
                     }
                     else
                     {
+                        Log?.Invoke($"failed processing {opcode} {packetNumber}");
                         SendNack(packetNumber);
                     }
                 }

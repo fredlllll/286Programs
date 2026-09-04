@@ -23,9 +23,13 @@
 static uint8_t sectorBuf[512];
 static bool stopRequested;
 static uint8_t state;
+static uint32_t lastAck;
+static uint32_t lastNack;
 
 #define STATE_PAUSE 0
 #define STATE_RUN 1
+
+bool checkCommand(uint32_t timeout);
 
 static void printCmd(uint8_t cmd)
 {
@@ -69,12 +73,28 @@ static void printCmd(uint8_t cmd)
   }
 }
 
+static bool ExpectAck(uint32_t packetNum)
+{
+  while (checkCommand(1 SECONDS))
+  {
+    if (lastAck == packetNum)
+    {
+      return TRUE;
+    }
+    if (lastNack == packetNum)
+    {
+      return FALSE;
+    }
+  }
+  return FALSE;
+}
+
 /* send one sector: header always, data only if read was successful.
    waits for ack/nak. returns 1 if ok to continue, 0 if stopped */
 static void sendOneSector(void)
 {
   uint8_t status;
-  uint8_t resp;
+  uint32_t packetNum;
 
   /* read the hdd sector */
   status = readHddResilient(sectorBuf);
@@ -82,16 +102,18 @@ static void sendOneSector(void)
   /* send header + data (if success) or header only (if failure) */
   // dont do retransmission here, serial faults extremely unlikely, just blocks the program and is hard to implement properly
   // do
-  //{
-  if (isStatusSuccess(status))
   {
-    sendSectorPacket(hddPos.lba, status, sectorBuf);
+    if (isStatusSuccess(status))
+    {
+      packetNum = sendSectorPacket(status, hddPos.lba, sectorBuf);
+    }
+    else
+    {
+      packetNum = sendSectorHeaderOnly(status, hddPos.lba);
+    }
   }
-  else
-  {
-    sendSectorHeaderOnly(hddPos.lba, status);
-  }
-  //} while (!ExpectAck());
+  while (!ExpectAck(packetNum))
+    ;
 
   advanceHddPosition();
 }
@@ -114,8 +136,6 @@ static bool verifyMagic(uint32_t timeout)
 
 bool checkCommand(uint32_t timeout)
 {
-  uint8_t tmp;
-  uint8_t buf[3];
   int16_t opcode;
   uint32_t packetNumber;
 
@@ -207,8 +227,6 @@ void loop(void)
 
 void program(void)
 {
-  int16_t cmd;
-
   state = STATE_PAUSE;
   stopRequested = FALSE;
 

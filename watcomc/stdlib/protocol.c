@@ -46,23 +46,29 @@ void sendPong(void)
   sendMessage(CMD_PONG, getNextMessageNumber());
 }
 
-void sendSectorHeaderOnly(uint32_t lba, uint8_t status)
+uint32_t sendSectorHeaderOnly(uint8_t status, uint32_t lba)
 {
+  uint32_t packetNum;
   struct SectorHeader hdr;
   hdr.status = status;
   hdr.lba = lba;
   hdr.dataCRC = 0;
-  sendMessageBody(CMD_SECTOR, getNextMessageNumber(), &hdr, sizeof(hdr));
+  packetNum = getNextMessageNumber();
+  sendMessageBody(CMD_SECTOR, packetNum, &hdr, sizeof(hdr));
+  return packetNum;
 }
 
-void sendSectorPacket(uint32_t lba, uint8_t status, const uint8_t *data)
+uint32_t sendSectorPacket(uint8_t status, uint32_t lba, const uint8_t *data)
 {
+  uint32_t packetNum;
   struct SectorHeader hdr;
   hdr.status = status;
   hdr.lba = lba;
   hdr.dataCRC = crc16(data, 512);
-  sendMessageBody(CMD_SECTOR, getNextMessageNumber(), &hdr, sizeof(hdr));
+  packetNum = getNextMessageNumber();
+  sendMessageBody(CMD_SECTOR, packetNum, &hdr, sizeof(hdr));
   uartSendBlock(data, 512);
+  return packetNum;
 }
 
 void sendStatusReply(const struct Geometry *geom, uint32_t currentLba, uint8_t headMask, uint8_t retries)
