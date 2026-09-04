@@ -104,7 +104,7 @@ static bool verifyMagic(uint32_t timeout)
   {
     return FALSE;
   }
-  b = uartRxTimeout(timeout);
+  b = uartRxTimeout(1 SECONDS);
   if (b != HEADER_MAGIC1)
   {
     return FALSE;
