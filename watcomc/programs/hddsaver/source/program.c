@@ -152,10 +152,12 @@ bool checkCommand(uint32_t timeout)
   uartRecvBlockTimeout(&packetNumber, 4, 1 SECONDS);
   if (opcode == CMD_ACK)
   {
+    lastAck = packetNumber;
     return TRUE; // ignore
   }
   if (opcode == CMD_NACK)
   {
+    lastNack = packetNumber;
     print("\r\nNack for packet ");
     printDecLong(packetNumber);
     return TRUE; // ignore, retransmissions are too hard
