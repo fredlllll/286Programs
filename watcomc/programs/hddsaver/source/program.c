@@ -43,6 +43,9 @@ static void printCmd(uint8_t cmd)
   case CMD_PING:
     print("[cmd] PING\r\n");
     break;
+  case CMD_SEND_STATUS:
+    print("[cmd] SEND_STATUS\r\n");
+    break;
   case CMD_STATUS:
     print("[cmd] STATUS\r\n");
     break;
@@ -151,12 +154,12 @@ void checkCommand(uint32_t timeout)
   case CMD_PING:
     sendPong();
     break;
-  case CMD_STATUS:
+  case CMD_SEND_STATUS:
     sendStatusReply(&hddGeom, hddPos.lba, headMask, hddRetries);
     break;
   case CMD_HEAD_MASK:
   {
-    uint16_t tmp = uartRxTimeout(1 SECONDS);
+    int16_t tmp = uartRxTimeout(1 SECONDS);
     if (tmp >= 0)
     {
       headMask = (uint8_t)tmp;
@@ -165,7 +168,7 @@ void checkCommand(uint32_t timeout)
   break;
   case CMD_RETRIES:
   {
-    uint16_t tmp = uartRxTimeout(1 SECONDS);
+    int16_t tmp = uartRxTimeout(1 SECONDS);
     if (tmp >= 0)
     {
       hddRetries = (uint8_t)tmp;

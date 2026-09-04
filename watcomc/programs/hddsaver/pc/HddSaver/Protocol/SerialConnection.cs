@@ -182,18 +182,14 @@ public class SerialConnection : IDisposable
 
     struct SeekBody
     {
-        public byte byte1;
-        public byte byte2;
-        public byte byte3;
+        public uint lba;
     }
 
     public void SendSeek(uint lba)
     {
         var bytes = new SeekBody
         {
-            byte1 = (byte)(lba & 0xFF),
-            byte2 = (byte)((lba >> 8) & 0xFF),
-            byte3 = (byte)((lba >> 16) & 0xFF),
+            lba = lba,
         };
         var num = GetNextMessageNum();
         var body = AssembleMessage(num, Opcode.Seek, bytes);

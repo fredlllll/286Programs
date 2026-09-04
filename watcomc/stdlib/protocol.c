@@ -23,7 +23,7 @@ static void sendMessage(uint8_t opcode, uint32_t packetNumber)
   uartSendBlock((uint8_t *)&packetNumber, sizeof(packetNumber));
 }
 
-static void sendMessage(uint8_t opcode, uint32_t packetNumber, void *body, uint16_t bodyLen)
+static void sendMessageBody(uint8_t opcode, uint32_t packetNumber, void *body, uint16_t bodyLen)
 {
   sendMagic();
   uartTxBlocking(opcode);
@@ -52,7 +52,7 @@ void sendSectorHeaderOnly(uint32_t lba, uint8_t status)
   hdr.status = status;
   hdr.lba = lba;
   hdr.dataCRC = 0;
-  sendMessage(CMD_SECTOR, getNextMessageNumber(), &hdr, sizeof(hdr));
+  sendMessageBody(CMD_SECTOR, getNextMessageNumber(), &hdr, sizeof(hdr));
 }
 
 void sendSectorPacket(uint32_t lba, uint8_t status, const uint8_t *data)
@@ -61,7 +61,7 @@ void sendSectorPacket(uint32_t lba, uint8_t status, const uint8_t *data)
   hdr.status = status;
   hdr.lba = lba;
   hdr.dataCRC = crc16(data, 512);
-  sendMessage(CMD_SECTOR, getNextMessageNumber(), &hdr, sizeof(hdr));
+  sendMessageBody(CMD_SECTOR, getNextMessageNumber(), &hdr, sizeof(hdr));
   uartSendBlock(data, 512);
 }
 
@@ -75,5 +75,5 @@ void sendStatusReply(const struct Geometry *geom, uint32_t currentLba, uint8_t h
   rep.currentLba = currentLba;
   rep.headMask = headMask;
   rep.retries = retries;
-  sendMessage(CMD_STATUS, getNextMessageNumber(), &rep, sizeof(rep));
+  sendMessageBody(CMD_STATUS, getNextMessageNumber(), &rep, sizeof(rep));
 }
