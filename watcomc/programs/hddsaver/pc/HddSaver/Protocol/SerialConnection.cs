@@ -269,7 +269,7 @@ public class SerialConnection : IDisposable
         Message structure:
         Byte Magic 0
         Byte Magic 1
-        Byte opcode (ack and nack end here)
+        Byte opcode
         Uint packetNumber
         [optional body of packet, depends on opcode]
         */

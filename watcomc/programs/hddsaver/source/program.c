@@ -111,7 +111,7 @@ static bool verifyMagic(uint32_t timeout)
   return TRUE;
 }
 
-void checkCommand(uint32_t timeout)
+bool checkCommand(uint32_t timeout)
 {
   uint8_t tmp;
   uint8_t buf[3];
@@ -120,26 +120,26 @@ void checkCommand(uint32_t timeout)
 
   if (!verifyMagic(timeout))
   {
-    return;
+    return FALSE; // magic verify failed, redo the thing till we sync
   }
-  opcode = uartRxTimeout(timeout);
+  opcode = uartRxTimeout(1 SECONDS);
   if (opcode < 0)
   {
-    return; // no command within timeout
+    return FALSE; // no command within timeout
   }
   printCmd(opcode);
-  uartRecvBlockTimeout(&packetNumber, 4, timeout);
+  uartRecvBlockTimeout(&packetNumber, 4, 1 SECONDS);
   if (opcode == CMD_ACK)
   {
-    return; // ignore
+    return TRUE; // ignore
   }
   if (opcode == CMD_NACK)
   {
     print("\r\nNack for packet ");
     printDecLong(packetNumber);
-    return; // ignore, retransmissions are too hard
+    return TRUE; // ignore, retransmissions are too hard
   }
-  Ack(packetNumber); // we just ack all messages
+  Ack(packetNumber); // we just ack all messages (not ack and nack though)
 
   switch (opcode)
   {
@@ -185,6 +185,7 @@ void checkCommand(uint32_t timeout)
   }
   break;
   }
+  return TRUE;
 }
 
 void loop(void)
@@ -225,10 +226,12 @@ void program(void)
     switch (state)
     {
     case STATE_PAUSE:
-      checkCommand(1 SECONDS);
+      while (checkCommand(1 SECONDS))
+        ;
       break;
     case STATE_RUN:
-      checkCommand(0);
+      while (checkCommand(1))
+        ;
       loop();
       break;
     default:
