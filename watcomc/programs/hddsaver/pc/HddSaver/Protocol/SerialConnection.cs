@@ -18,7 +18,7 @@ public class SerialConnection : IDisposable
     private object _streamWriterLock = new();
     private object _streamReaderLock = new();
     private SerialPort? _port;
-    private bool _running = false;
+    private volatile bool _running = false;
     private Thread? _thread;
     private BinaryReader _reader = null!;
     private BinaryWriter _writer = null!;
@@ -133,11 +133,7 @@ public class SerialConnection : IDisposable
     public void Connect(string portName, int baudRate = 9600)
     {
         Disconnect();
-        _port = new SerialPort(portName, baudRate, Parity.None, 8, StopBits.One)
-        {
-            ReadTimeout = 5000,
-            WriteTimeout = 1000
-        };
+        _port = new SerialPort(portName, baudRate, Parity.None, 8, StopBits.One);
         _port.Open();
         _stream = _port.BaseStream;
         _reader = new BinaryReader(_stream, Encoding.ASCII, true);
@@ -230,6 +226,7 @@ public class SerialConnection : IDisposable
     public void StartReceiving()
     {
         StopReceiving();
+        _running = true;
         _thread = new Thread(ReadLoop);
         _thread.IsBackground = true;
         _thread.Start();
@@ -237,6 +234,7 @@ public class SerialConnection : IDisposable
 
     public void StopReceiving()
     {
+        _running = false;
         if (_thread != null)
         {
             _thread.Interrupt();
@@ -275,14 +273,19 @@ public class SerialConnection : IDisposable
         */
         while (_running)
         {
+            Log?.Invoke("in loop");
             try
             {
+                Log?.Invoke("in try");
                 lock (_streamReaderLock)
                 {
+                    Log?.Invoke("in lock");
                     if (!VerifyMagic())
                     {
+                        Log?.Invoke("invalid magic");
                         continue;
                     }
+                    Log?.Invoke("getting opcode");
                     var opcode = _reader.ReadOpcode();
                     uint packetNumber = _reader.ReadUInt32();
                     if (opcode == Opcode.Ack)
