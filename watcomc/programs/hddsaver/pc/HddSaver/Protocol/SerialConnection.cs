@@ -133,7 +133,10 @@ public class SerialConnection : IDisposable
     public void Connect(string portName, int baudRate = 9600)
     {
         Disconnect();
-        _port = new SerialPort(portName, baudRate, Parity.None, 8, StopBits.One);
+        _port = new SerialPort(portName, baudRate, Parity.None, 8, StopBits.One) { 
+        WriteTimeout=5000,
+        ReadTimeout=5000
+        };
         _port.Open();
         _stream = _port.BaseStream;
         _reader = new BinaryReader(_stream, Encoding.ASCII, true);
