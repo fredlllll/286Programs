@@ -37,6 +37,7 @@ namespace HddSaver
                 AppendLog($"Status: {s.totalCyls}cyl {s.totalHeads}hd {s.totalSpt}spt LBA={s.currentLba} mask=0x{s.headMask:X2} retries={s.retries}");
                 lblProgress.Text = $"LBA {s.currentLba}/{s.totalSectors} ({s.totalCyls}cyl {s.totalHeads}hd {s.totalSpt}spt)";
                 lblSectorsReceived.Text = $"Mask: 0x{s.headMask:X2} Retries: {s.retries}";
+                SyncStatusToUi(s);
             });
 
             progressTimer.Tick += (s, e) => RefreshProgress();
@@ -143,6 +144,17 @@ namespace HddSaver
             if (chkHead4.Checked) mask |= 0x10;
             if (chkHead5.Checked) mask |= 0x20;
             return mask;
+        }
+
+        private void SyncStatusToUi(StatusReply s)
+        {
+            chkHead0.Checked = (s.headMask & 0x01) != 0;
+            chkHead1.Checked = (s.headMask & 0x02) != 0;
+            chkHead2.Checked = (s.headMask & 0x04) != 0;
+            chkHead3.Checked = (s.headMask & 0x08) != 0;
+            chkHead4.Checked = (s.headMask & 0x10) != 0;
+            chkHead5.Checked = (s.headMask & 0x20) != 0;
+            txtRetries.Text = s.retries.ToString();
         }
 
         private void GenerateBadMap()
