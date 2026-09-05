@@ -1,40 +1,39 @@
 ﻿using HddSaver.Protocol;
 using System;
-using System.Collections.Generic;
+using System.IO;
 using System.Runtime.InteropServices;
-using System.Text;
 
 namespace HddSaver
 {
     public static class BinaryReaderExtensions
     {
-        public static T ReadStruct<T>(this Stream stream) where T : unmanaged
+        /// <summary>
+        /// Reads exactly count bytes. Each byte goes through <see cref="BinaryReader.ReadByte"/>,
+        /// which on a serial port blocks (honoring ReadTimeout) instead of returning 0 like a
+        /// multi-byte <c>Stream.Read</c> on <see cref="SerialPort.BaseStream"/> would.
+        /// </summary>
+        public static byte[] ReadBytesExactly(this BinaryReader reader, int count)
         {
-            Span<byte> buffer = stackalloc byte[Marshal.SizeOf<T>()];
-            int read = stream.Read(buffer);
-            if (read < buffer.Length)
-                throw new EndOfStreamException($"Not enough bytes to read {typeof(T).Name}");
-            return MemoryMarshal.Read<T>(buffer);
+            byte[] data = new byte[count];
+            for (int i = 0; i < count; i++)
+                data[i] = reader.ReadByte();
+            return data;
+        }
+
+        public static uint ReadUInt32Exactly(this BinaryReader reader)
+        {
+            Span<byte> buffer = stackalloc byte[4];
+            for (int i = 0; i < buffer.Length; i++)
+                buffer[i] = reader.ReadByte();
+            return MemoryMarshal.Read<uint>(buffer);
         }
 
         public static T ReadStruct<T>(this BinaryReader reader) where T : unmanaged
         {
-            return reader.BaseStream.ReadStruct<T>();
-        }
-
-        public static T[] ReadStructs<T>(this Stream stream, int count) where T : unmanaged
-        {
-            T[] values = new T[count];
-            for (int i = 0; i < count; ++i)
-            {
-                values[i] = stream.ReadStruct<T>();
-            }
-            return values;
-        }
-
-        public static T[] ReadStructs<T>(this BinaryReader reader, int count) where T : unmanaged
-        {
-            return reader.BaseStream.ReadStructs<T>(count);
+            Span<byte> buffer = stackalloc byte[Marshal.SizeOf<T>()];
+            for (int i = 0; i < buffer.Length; i++)
+                buffer[i] = reader.ReadByte();
+            return MemoryMarshal.Read<T>(buffer);
         }
 
         public static Opcode ReadOpcode(this BinaryReader reader)

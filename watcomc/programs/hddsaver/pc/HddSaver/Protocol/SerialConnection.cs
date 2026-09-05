@@ -3,7 +3,6 @@ using HddSaver.Models;
 using Microsoft.EntityFrameworkCore;
 using System.IO;
 using System.IO.Ports;
-using System.Net.Sockets;
 using System.Text;
 using static System.Windows.Forms.VisualStyles.VisualStyleElement;
 
@@ -293,7 +292,7 @@ public class SerialConnection : IDisposable
                         continue;
                     }
                     var opcode = _reader.ReadOpcode();
-                    uint packetNumber = _reader.ReadUInt32();
+                    uint packetNumber = _reader.ReadUInt32Exactly();
                     if (opcode == Opcode.Ack)
                     {
                         Log?.Invoke($"ack {packetNumber}");
@@ -334,7 +333,7 @@ public class SerialConnection : IDisposable
         byte[]? data = null;
         if (sh.HasData)
         {
-            data = _reader.ReadBytes(512);
+            data = _reader.ReadBytesExactly(512);
             if (!sh.VerifyDataCrc(data))
             {
                 Log?.Invoke($"failed to verify data for sector {sh.lba}");
