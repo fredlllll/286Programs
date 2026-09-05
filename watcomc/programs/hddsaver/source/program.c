@@ -120,14 +120,17 @@ static void sendOneSector(void)
 
 static bool verifyMagic(uint32_t timeout)
 {
+  int16_t response;
   uint8_t b;
-  b = uartRxTimeout(timeout);
-  if (b != HEADER_MAGIC0)
+  response = uartRxTimeout(timeout);
+  b = (uint8_t)response;
+  if (response < 0 || b != HEADER_MAGIC0)
   {
     return FALSE;
   }
-  b = uartRxTimeout(1 SECONDS);
-  if (b != HEADER_MAGIC1)
+  response = uartRxTimeout(1 SECONDS);
+  b = (uint8_t)response;
+  if (response < 0 || b != HEADER_MAGIC1)
   {
     return FALSE;
   }
@@ -146,32 +149,39 @@ bool checkCommand(uint32_t timeout)
   opcode = uartRxTimeout(1 SECONDS);
   if (opcode < 0)
   {
+    print("\r\nTimeout after receiving magic (no opcode)");
     return FALSE; // no command within timeout
   }
   printCmd(opcode);
-  uartRecvBlockTimeout(&packetNumber, 4, 1 SECONDS);
+  if (!uartRecvBlockTimeout(&packetNumber, sizeof(packetNumber), 1 SECONDS))
+  {
+    print("\r\nTimeout after receiving opcode (no packet number)");
+    return FALSE; // timed out when reading packet number
+  }
   if (opcode == CMD_ACK)
   {
     lastAck = packetNumber;
-    return TRUE; // ignore
+    return TRUE;
   }
   if (opcode == CMD_NACK)
   {
     lastNack = packetNumber;
     print("\r\nNack for packet ");
     printDecLong(packetNumber);
-    return TRUE; // ignore, retransmissions are too hard
+    return TRUE;
   }
-  Ack(packetNumber); // we just ack all messages (not ack and nack though)
+  Ack(packetNumber); // we just ack all messages (except ack and nack we receive)
 
   switch (opcode)
   {
   case CMD_START:
     state = STATE_RUN;
+    print("\r\nStarted at lba ");
+    printDecLong(hddPos.lba);
     break;
   case CMD_STOP:
     state = STATE_PAUSE;
-    print("\r\ndump paused at lba ");
+    print("\r\nPaused at lba ");
     printDecLong(hddPos.lba);
     break;
   case CMD_PING:
@@ -186,6 +196,8 @@ bool checkCommand(uint32_t timeout)
     if (tmp >= 0)
     {
       headMask = (uint8_t)tmp;
+      print("\r\nReceived headmask ");
+      printHex(headMask);
     }
   }
   break;
@@ -195,6 +207,8 @@ bool checkCommand(uint32_t timeout)
     if (tmp >= 0)
     {
       hddRetries = (uint8_t)tmp;
+      print("\r\nReceived retries ");
+      printHex(hddRetries);
     }
   }
   break;
@@ -204,6 +218,8 @@ bool checkCommand(uint32_t timeout)
     if (uartRecvBlockTimeout(&lba, sizeof(lba), 1 SECONDS))
     {
       seekHdd(lba);
+      print("\r\nReceived seek to ");
+      printDecLong(lba);
     }
   }
   break;
