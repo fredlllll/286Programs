@@ -41,6 +41,9 @@
 #define HEADER_MAGIC0 0xAA
 #define HEADER_MAGIC1 0x55
 
+/* sector status codes (shared with recovery/structures.py) */
+#define ST_HEADSKIP 0xFE /* head masked out this pass, never attempted */
+
 /* sector header as it appears on the wire */
 #pragma pack(push, 1)
 struct SectorHeader

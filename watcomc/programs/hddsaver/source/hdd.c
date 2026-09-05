@@ -24,7 +24,7 @@ void seekHdd(uint32_t target)
 
 uint8_t isStatusSuccess(uint8_t status)
 {
-  return status == 0 || status == 0x11;
+  return status == ST_OK || status == ST_ECC;
 }
 
 /* reads one hdd sector. retries up to hddRetries times (configurable,
@@ -33,9 +33,9 @@ uint8_t isStatusSuccess(uint8_t status)
    and back), which we avoid on a drive with weak heads.
 
    returns the final bios status so the caller can store it in the
-   sector descriptor: 0 = clean read, 0x11 = "ecc corrected it, data
-   is fine" (both count as good, data gets dumped), anything else =
-   given up after every attempt. a dead sector does NOT get dumped:
+   sector descriptor: ST_OK = clean read, ST_ECC = "ecc corrected it,
+   data is fine" (both count as good, data gets dumped), anything else
+   = given up after every attempt. a dead sector does NOT get dumped:
    its lba and the error code land in the next descriptor block and
    the dump carries on - one bad sector costs 5 bytes, not 512 */
 uint8_t readHddResilient(void __far *dest)

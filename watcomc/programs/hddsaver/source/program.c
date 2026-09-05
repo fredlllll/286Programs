@@ -96,6 +96,18 @@ static void sendOneSector(void)
   uint8_t status;
   uint32_t packetNum;
 
+  /* head masked out this pass: never touch the drive, just emit a
+     header-only skip descriptor so the assembler knows it wasn't
+     attempted (ST_HEADSKIP, see recovery/structures.py) */
+  if ((headMask & (1 << hddPos.head)) == 0)
+  {
+    packetNum = sendSectorHeaderOnly(ST_HEADSKIP, hddPos.lba);
+    while (!ExpectAck(packetNum))
+      ;
+    advanceHddPosition();
+    return;
+  }
+
   /* read the hdd sector */
   status = readHddResilient(sectorBuf);
 

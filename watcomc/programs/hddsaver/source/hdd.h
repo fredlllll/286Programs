@@ -6,6 +6,12 @@
 #include "definitions.h"
 #include "int13.h"
 
+/* ---- bios read status codes ----
+   returned by readHddResilient (see isStatusSuccess below). 0 = clean
+   read, 0x11 = read but ecc-corrected, both carry good data */
+#define ST_OK 0x00
+#define ST_ECC 0x11
+
 /* ---- runtime geometry ----
    initialized from definitions.h; the startup prompts in main()
    may override it. see definitions.h for what chs means */
@@ -34,8 +40,8 @@ void seekHdd(uint32_t lba);
 uint8_t isStatusSuccess(uint8_t status);
 
 /* reads one hdd sector into dest with retries. returns the bios
-   status: 0 = clean read, 0x11 = read but ecc-corrected (both are
-   good data), anything else = unreadable, dest content undefined
+   status: ST_OK = clean read, ST_ECC = read but ecc-corrected (both
+   are good data), anything else = unreadable, dest content undefined
    and NOT to be dumped; caller records the code in the sector
    descriptor instead. dest is a far pointer (see int13.h); the near
    hddReadBuffer converts automatically */
