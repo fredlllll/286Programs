@@ -28,7 +28,9 @@
 // %%load_seg%% is the segment main.bin is loaded into (0 normally),
 // %%load_off%% the offset within it (0x7E00 in segment 0, right
 // behind us; a dedicated load segment has nothing at its bottom, so
-// there build.py sets it to 0).
+// there build.py sets it to 0) and %%load_sp%% the initial stack
+// pointer in that segment (0x7C00 in segment 0; a dedicated load
+// segment can just start from the top, e.g. 0xFFFE).
 //
 // build.py also appends the required 55 AA signature to this code,
 // which is why you will not find it here.
@@ -69,7 +71,7 @@ void __declspec ( naked ) __declspec ( noreturn ) init (void)
         mov ax, %%load_seg%%
         mov ds, ax        ; data segment = %%load_seg%% (matches dgroup)
         mov ss, ax        ; stack in the same segment
-        mov sp, 7C00h     ; grows down from %%load_seg%%:7C00
+        mov sp, %%load_sp%% ; grows down from %%load_seg%%:%%load_sp%%
 
         ; ---- far jump to %%load_seg%%:%%load_off%% -------------------
         push ax           ; segment

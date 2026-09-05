@@ -19,6 +19,12 @@ LOAD_SEG = 0
 # ours from offset 0, so there it can (and should) be 0x0000.
 LOAD_OFF = 0x7E00
 
+# initial stack pointer inside the load segment. 0x7C00 matches the
+# historic segment-0 layout (stack at the foot of the 64kb area, right
+# below the bootloader). a dedicated load segment has 0xFFFE available
+# as its very top, so there is no reason not to start from there.
+LOAD_SP = 0x7C00
+
 WCC_BASE = "-2 -d0 -wx -ms -s -zl"
 
 def silent_remove(filename):
@@ -92,7 +98,7 @@ def link_main(names, obj_dir, wcc_flags, arena_seg, load_seg, load_off):
         sys.exit("failed to link main.bin")
     check_memory_layout(obj_dir, arena_seg, load_seg)
 
-def process_bootloader(bootloader_path, obj_dir, wcc_flags, load_seg, load_off):
+def process_bootloader(bootloader_path, obj_dir, wcc_flags, load_seg, load_off, load_sp):
     silent_remove(os.path.join(obj_dir, "bootloader.tmp.obj"))
     silent_remove(os.path.join(obj_dir, "bootloader.tmp.err"))
 
@@ -108,6 +114,7 @@ def process_bootloader(bootloader_path, obj_dir, wcc_flags, load_seg, load_off):
     bootloader_code = bootloader_code.replace("%%num_sectors%%", str(main_sectors))
     bootloader_code = bootloader_code.replace("%%load_seg%%", "0%04Xh" % load_seg)
     bootloader_code = bootloader_code.replace("%%load_off%%", "0%04Xh" % load_off)
+    bootloader_code = bootloader_code.replace("%%load_sp%%", "0%04Xh" % load_sp)
     with open("bootloader.tmp.c", 'w') as f:
         f.write(bootloader_code)
 
@@ -162,6 +169,9 @@ def build_program(config):
       load_off      - optional: offset into the load segment where the
                       image starts (default 0x7E00; use 0 for a dedicated
                       load segment)
+      load_sp       - optional: initial stack pointer in the load segment
+                      (default 0x7C00; use 0xFFFE for a dedicated load
+                      segment)
       extra_obj     - optional: list of pre-existing .obj files to link
     """
     source_dir = config["source_dir"]
@@ -170,6 +180,7 @@ def build_program(config):
     arena_seg = config.get("arena_seg", ARENA_SEG)
     load_seg = config.get("load_seg", LOAD_SEG)
     load_off = config.get("load_off", LOAD_OFF)
+    load_sp = config.get("load_sp", LOAD_SP)
     stdlib_dir = config.get("stdlib_dir")
     obj_dir = "obj"
 
@@ -209,5 +220,5 @@ def build_program(config):
     link_main(all_names, obj_dir, wcc_flags, arena_seg, load_seg, load_off)
 
     # build bootloader and final image
-    bootloader, main = process_bootloader(bootloader_path, obj_dir, wcc_flags, load_seg, load_off)
+    bootloader, main = process_bootloader(bootloader_path, obj_dir, wcc_flags, load_seg, load_off, load_sp)
     write_image(output_path, bootloader, main)
