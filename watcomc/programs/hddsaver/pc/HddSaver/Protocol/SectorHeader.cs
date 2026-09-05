@@ -10,7 +10,7 @@ public struct SectorHeader
     
     public ushort dataCrc;
 
-    public bool HasData => status == 0x00 || status == 0x11;
+    public bool HasData => SectorStatus.HasData(status);
 
     public bool VerifyDataCrc(byte[] data)
     {

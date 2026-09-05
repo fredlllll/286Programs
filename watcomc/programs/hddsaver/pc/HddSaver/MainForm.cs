@@ -170,7 +170,7 @@ namespace HddSaver
             {
                 using var ctx = new HddSaverContext();
                 var count = ctx.Sectors.Count();
-                var errors = ctx.Sectors.Count(s => s.Status != 0 && s.Status != 0x11);
+                var errors = ctx.Sectors.Count(s => !SectorStatus.HasData(s.Status) && s.Status != SectorStatus.HeadSkip);
                 lblProgress.Text = $"Sectors: {count}";
                 lblSectorsReceived.Text = $"Received: {count}";
                 lblErrors.Text = $"Errors: {errors}";

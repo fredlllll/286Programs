@@ -1,4 +1,5 @@
 using HddSaver.Data;
+using HddSaver.Protocol;
 using Microsoft.EntityFrameworkCore;
 
 namespace HddSaver.Services;
@@ -32,20 +33,21 @@ public static class BadMapGenerator
         foreach (var sec in sectors)
         {
             if (sec.Lba >= total) continue;
-            if (sec.Status == 0x00 || sec.Status == 0x11)
+            if (SectorStatus.HasData(sec.Status))
             {
                 state[sec.Lba] = 1; // readable
             }
-            else if (sec.Status == 0x04 || sec.Status == 0x05)
+            else if (sec.Status == SectorStatus.HeadSkip)
             {
-                // head skip / abnormal termination — treat as head-masked
+                // head skip — treat as head-masked, never clobber a good read
                 if (state[sec.Lba] == 0)
                     state[sec.Lba] = 3;
             }
             else
             {
+                // read failed, but a good read anywhere wins over it
                 if (state[sec.Lba] < 2)
-                    state[sec.Lba] = 2; // read failed
+                    state[sec.Lba] = 2;
             }
         }
 
