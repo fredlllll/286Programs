@@ -253,15 +253,30 @@ public class SerialConnection : IDisposable
         {
             lock (_streamReaderLock)
             {
-                byte magic = _reader.ReadByte();
-                if (magic != HEADER_MAGIC0)
+                // resync scanner: consume bytes until we see the 0xAA 0x55
+                // pair. a stray byte just gets eaten and we re-lock on the
+                // next real magic instead of reading from a shifted position.
+                bool gotMagic0 = false;
+                while (true)
                 {
-                    return false;
-                }
-                magic = _reader.ReadByte();
-                if (magic != HEADER_MAGIC1)
-                {
-                    return false;
+                    byte magic = _reader.ReadByte();
+                    if (!gotMagic0)
+                    {
+                        if (magic == HEADER_MAGIC0)
+                        {
+                            gotMagic0 = true;
+                        }
+                        continue;
+                    }
+                    if (magic == HEADER_MAGIC1)
+                    {
+                        return true;
+                    }
+                    if (magic == HEADER_MAGIC0)
+                    {
+                        continue; // back-to-back magics: this one may start the real pair
+                    }
+                    gotMagic0 = false;
                 }
             }
         }
@@ -269,7 +284,6 @@ public class SerialConnection : IDisposable
         {
             return false; //no data came in time
         }
-        return true;
     }
 
     private void ReadLoop()

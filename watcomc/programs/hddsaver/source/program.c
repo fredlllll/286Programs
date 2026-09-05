@@ -120,21 +120,44 @@ static void sendOneSector(void)
 
 static bool verifyMagic(uint32_t timeout)
 {
-  int16_t response;
-  uint8_t b;
-  response = uartRxTimeout(timeout);
-  b = (uint8_t)response;
-  if (response < 0 || b != HEADER_MAGIC0)
+  /* resync scanner: slide over the incoming stream looking for the
+     0xAA 0x55 magic pair instead of requiring the caller to retry
+     from a fixed position. a single stray or lost byte just gets
+     consumed and we lock onto the next real magic, so the parser can
+     no longer be shifted by a one-byte glitch permanently. */
+  int16_t b;
+  bool gotMagic0 = FALSE;
+  uint32_t start = biosTicks();
+
+  while (1)
   {
-    return FALSE;
+    if (uartRxReady())
+    {
+      b = uartRx();
+      if (!gotMagic0)
+      {
+        if (b == (int16_t)HEADER_MAGIC0)
+        {
+          gotMagic0 = TRUE;
+        }
+        continue;
+      }
+      if (b == (int16_t)HEADER_MAGIC1)
+      {
+        return TRUE;
+      }
+      if (b == (int16_t)HEADER_MAGIC0)
+      {
+        continue; /* back-to-back magics: this one may start the real pair */
+      }
+      gotMagic0 = FALSE;
+      continue;
+    }
+    if (biosTicks() - start > timeout)
+    {
+      return FALSE;
+    }
   }
-  response = uartRxTimeout(1 SECONDS);
-  b = (uint8_t)response;
-  if (response < 0 || b != HEADER_MAGIC1)
-  {
-    return FALSE;
-  }
-  return TRUE;
 }
 
 bool checkCommand(uint32_t timeout)
