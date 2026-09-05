@@ -28,6 +28,9 @@ static uint32_t lastNack;
 
 #define STATE_PAUSE 0
 #define STATE_RUN 1
+/* ack handshake robustness. a sector packet is resent up to ACK_RETRIES
+   times unless its ack arrives within the per-try timeout. */
+#define ACK_RETRIES 4
 
 bool checkCommand(uint32_t timeout);
 
@@ -36,49 +39,41 @@ static void printCmd(uint8_t cmd)
   switch (cmd)
   {
   case CMD_START:
-    print("[cmd] START\r\n");
+    print("\r\n[cmd] START");
     break;
   case CMD_STOP:
-    print("[cmd] STOP\r\n");
+    print("\r\n[cmd] STOP");
     break;
   case CMD_SEEK:
-    print("[cmd] SEEK\r\n");
+    print("\r\n[cmd] SEEK");
     break;
   case CMD_PING:
-    print("[cmd] PING\r\n");
+    print("\r\n[cmd] PING");
     break;
   case CMD_SEND_STATUS:
-    print("[cmd] SEND_STATUS\r\n");
+    print("\r\n[cmd] SEND_STATUS");
     break;
   case CMD_STATUS:
-    print("[cmd] STATUS\r\n");
+    print("\r\n[cmd] STATUS");
     break;
   case CMD_HEAD_MASK:
-    print("[cmd] HEAD_MASK\r\n");
+    print("\r\n[cmd] HEAD_MASK");
     break;
   case CMD_RETRIES:
-    print("[cmd] RETRIES\r\n");
+    print("\r\n[cmd] RETRIES");
     break;
   case CMD_ACK:
-    print("[cmd] ACK\r\n");
+    print("\r\n[cmd] ACK");
     break;
   case CMD_NACK:
-    print("[cmd] NACK\r\n");
+    print("\r\n[cmd] NACK");
     break;
   default:
-    print("[cmd] unknown 0x");
+    print("\r\n[cmd] unknown 0x");
     printHex(cmd);
-    print("\r\n");
     break;
   }
 }
-
-/* ack handshake robustness. a sector packet is resent up to ACK_RETRIES
-   times unless its ack arrives within the per-try timeout. the old code
-   waited for the exact ack forever with no resend, so a single truncated
-   ack (e.g. a byte dropped crossing the rts gate in sendOneSector) or a
-   nak wedged the dump permanently at ~1000 sectors. */
-#define ACK_RETRIES 4
 
 /* wait up to timeoutTicks for the pc's ack of packetNum. unrelated
    commands are still parsed and answered, so ping/status/stop keep
@@ -158,9 +153,8 @@ static void sendOneSector(void)
 
   if (attempt == ACK_RETRIES)
   {
-    print("give up, no ack for lba ");
+    print("\r\ngive up, no ack for lba ");
     printDecLong(hddPos.lba);
-    print("\r\n");
   }
 
   advanceHddPosition();
@@ -319,8 +313,8 @@ void program(void)
   state = STATE_PAUSE;
   stopRequested = FALSE;
 
-  print("hdd saver 3.1 - serial mode 9600 8N1\r\n");
-  print("waiting for pc connection...\r\n");
+  print("hdd saver 3.1 - serial mode 9600 8N1");
+  print("\r\nwaiting for pc connection...");
 
   /* outer loop: idle → stream → stop → idle */
   while (1)
