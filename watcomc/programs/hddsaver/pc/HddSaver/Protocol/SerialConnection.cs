@@ -86,8 +86,16 @@ public class SerialConnection : IDisposable
                 pending.Attempts++;
             }
         }
-        if (bytes == null) { Log?.Invoke($"Tried to retransmit not existing message with number {num}"); return; }
-        lock (_streamWriterLock) { SendMagic(); _stream!.Write(bytes); }
+        if (bytes == null)
+        {
+            Log?.Invoke($"Tried to retransmit not existing message with number {num}");
+            return;
+        }
+        lock (_streamWriterLock)
+        {
+            SendMagic();
+            _stream!.Write(bytes);
+        }
     }
 
     /// <summary>
@@ -96,17 +104,24 @@ public class SerialConnection : IDisposable
     /// <param name="num"></param>
     private void ConfirmReceived(uint num)
     {
-        lock (_pendingLock) { sentMessages.Remove(num); }
+        lock (_pendingLock)
+        {
+            sentMessages.Remove(num);
+        }
     }
 
     private void SendMessage(uint num, byte[] bytes)
     {
-        lock (_streamWriterLock) { SendMagic(); _stream!.Write(bytes); }
-        Log?.Invoke($"Sent message with num {num}");
         lock (_pendingLock)
         {
             sentMessages[num] = new PendingMessage { Bytes = bytes, SentAt = DateTime.UtcNow };
         }
+        lock (_streamWriterLock)
+        {
+            SendMagic();
+            _stream!.Write(bytes);
+        }
+        Log?.Invoke($"Sent message with num {num}");
     }
 
     private uint GetNextMessageNum()
@@ -433,7 +448,9 @@ public class SerialConnection : IDisposable
             foreach (var kvp in sentMessages)
             {
                 if ((now - kvp.Value.SentAt).TotalMilliseconds < AckTimeoutMs)
+                {
                     continue;
+                }
 
                 if (kvp.Value.Attempts >= MaxRetries)
                 {
@@ -445,15 +462,24 @@ public class SerialConnection : IDisposable
                 kvp.Value.SentAt = now;
                 toResend.Add((kvp.Key, kvp.Value.Bytes));
             }
-            foreach (var num in toGiveUp) sentMessages.Remove(num);
+            foreach (var num in toGiveUp)
+            {
+                sentMessages.Remove(num);
+            }
         }
 
         foreach (var num in toGiveUp)
+        {
             Log?.Invoke($"Giving up on message {num} after {MaxRetries} retries - no ack received");
+        }
 
         foreach (var (num, bytes) in toResend)
         {
-            lock (_streamWriterLock) { SendMagic(); _stream!.Write(bytes); }
+            lock (_streamWriterLock)
+            {
+                SendMagic();
+                _stream!.Write(bytes);
+            }
             Log?.Invoke($"Resending message {num} (no ack yet)");
         }
     }
