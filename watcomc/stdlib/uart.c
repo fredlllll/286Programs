@@ -220,3 +220,11 @@ void uartFlushRx()
 {
   head = tail;
 }
+
+void uartSetRts(bool asserted)
+{
+  if (asserted)
+    out8(MCR, 0x0B); /* DTR + RTS + OUT2 */
+  else
+    out8(MCR, 0x09); /* DTR + OUT2, RTS deasserted — tells the PC to hold off */
+}

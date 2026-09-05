@@ -53,4 +53,6 @@ bool uartRecvBlockTimeout(void *buf, uint16_t len, uint32_t timeoutTicks);
 /* flush receive buffer: discard all pending bytes */
 void uartFlushRx();
 
+void uartSetRts(bool asserted);
+
 #endif

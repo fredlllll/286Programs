@@ -10,8 +10,18 @@ namespace HddSaver.Protocol;
 
 public class SerialConnection : IDisposable
 {
+    private class PendingMessage
+    {
+        public byte[] Bytes = null!;
+        public DateTime SentAt;
+        public int Attempts;
+    }
+
     public const byte HEADER_MAGIC0 = 0xAA;
     public const byte HEADER_MAGIC1 = 0x55;
+    private const int AckTimeoutMs = 750; // generous: a sector transfer alone can
+                                          // take ~550ms at 9600 baud, plus disk time
+    private const int MaxRetries = 10;
 
     private Stream? _stream;
     private object _streamWriterLock = new();
@@ -21,8 +31,10 @@ public class SerialConnection : IDisposable
     private Thread? _thread;
     private BinaryReader _reader = null!;
     private BinaryWriter _writer = null!;
-    private Dictionary<uint, byte[]> sentMessages = new();
     private uint currentSentMessageNum = 1;
+    private readonly object _pendingLock = new();
+    private Dictionary<uint, PendingMessage> sentMessages = new();
+    private System.Threading.Timer? _retryTimer;
 
     public event Action<string>? Log;
     public event Action<uint, byte, bool>? SectorReceived;
@@ -64,18 +76,18 @@ public class SerialConnection : IDisposable
     /// <param name="num"></param>
     private void Retransmit(uint num)
     {
-        if (sentMessages.TryGetValue(num, out var msg))
+        byte[]? bytes = null;
+        lock (_pendingLock)
         {
-            lock (_streamWriterLock)
+            if (sentMessages.TryGetValue(num, out var pending))
             {
-                SendMagic();
-                _stream!.Write(msg);
+                bytes = pending.Bytes;
+                pending.SentAt = DateTime.UtcNow;
+                pending.Attempts++;
             }
         }
-        else
-        {
-            Log?.Invoke($"Tried to retransmit not existing message with number {num}");
-        }
+        if (bytes == null) { Log?.Invoke($"Tried to retransmit not existing message with number {num}"); return; }
+        lock (_streamWriterLock) { SendMagic(); _stream!.Write(bytes); }
     }
 
     /// <summary>
@@ -84,20 +96,16 @@ public class SerialConnection : IDisposable
     /// <param name="num"></param>
     private void ConfirmReceived(uint num)
     {
-        if (sentMessages.ContainsKey(num))
-        {
-            sentMessages.Remove(num);
-        }
+        lock (_pendingLock) { sentMessages.Remove(num); }
     }
 
     private void SendMessage(uint num, byte[] bytes)
     {
-        lock (_streamWriterLock)
+        lock (_streamWriterLock) { SendMagic(); _stream!.Write(bytes); }
+        Log?.Invoke($"Sent message with num {num}");
+        lock (_pendingLock)
         {
-            SendMagic();
-            _stream!.Write(bytes);
-            Log?.Invoke($"Sent message with num {num}");
-            sentMessages.Add(num, bytes);
+            sentMessages[num] = new PendingMessage { Bytes = bytes, SentAt = DateTime.UtcNow };
         }
     }
 
@@ -136,7 +144,8 @@ public class SerialConnection : IDisposable
         _port = new SerialPort(portName, baudRate, Parity.None, 8, StopBits.One)
         {
             WriteTimeout = 5000,
-            ReadTimeout = 5000
+            ReadTimeout = 5000,
+            Handshake = Handshake.RequestToSend
         };
         _port.Open();
         _stream = _port.BaseStream;
@@ -144,6 +153,7 @@ public class SerialConnection : IDisposable
         _writer = new BinaryWriter(_stream, Encoding.ASCII, true);
         _port.DiscardInBuffer();
         StartReceiving();
+        _retryTimer = new System.Threading.Timer(_ => CheckRetries(), null, 100, 100);
         Log?.Invoke($"Connected to {portName} @ {baudRate}");
     }
 
@@ -401,5 +411,41 @@ public class SerialConnection : IDisposable
     {
         Disconnect();
         GC.SuppressFinalize(this);
+    }
+
+    private void CheckRetries()
+    {
+        var toResend = new List<(uint num, byte[] bytes)>();
+        var toGiveUp = new List<uint>();
+
+        lock (_pendingLock)
+        {
+            var now = DateTime.UtcNow;
+            foreach (var kvp in sentMessages)
+            {
+                if ((now - kvp.Value.SentAt).TotalMilliseconds < AckTimeoutMs)
+                    continue;
+
+                if (kvp.Value.Attempts >= MaxRetries)
+                {
+                    toGiveUp.Add(kvp.Key);
+                    continue;
+                }
+
+                kvp.Value.Attempts++;
+                kvp.Value.SentAt = now;
+                toResend.Add((kvp.Key, kvp.Value.Bytes));
+            }
+            foreach (var num in toGiveUp) sentMessages.Remove(num);
+        }
+
+        foreach (var num in toGiveUp)
+            Log?.Invoke($"Giving up on message {num} after {MaxRetries} retries - no ack received");
+
+        foreach (var (num, bytes) in toResend)
+        {
+            lock (_streamWriterLock) { SendMagic(); _stream!.Write(bytes); }
+            Log?.Invoke($"Resending message {num} (no ack yet)");
+        }
     }
 }

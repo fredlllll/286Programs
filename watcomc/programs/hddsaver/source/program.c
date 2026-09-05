@@ -109,7 +109,9 @@ static void sendOneSector(void)
   }
 
   /* read the hdd sector */
+  uartSetRts(FALSE); //signal we cant receive during hdd read
   status = readHddResilient(sectorBuf);
+  uartSetRts(TRUE);
 
   /* send header + data (if success) or header only (if failure) */
   // dont do retransmission here, serial faults extremely unlikely, just blocks the program and is hard to implement properly
