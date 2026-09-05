@@ -159,13 +159,22 @@ public class SerialConnection : IDisposable
 
     public void Disconnect()
     {
+        _retryTimer?.Dispose();
+        _retryTimer = null;
         StopReceiving();
         _stream?.Close();
         _stream = null;
         _port?.Dispose();
         _port = null;
-        _reader?.Dispose();
-        _writer?.Dispose();
+        try
+        {
+            _reader?.Dispose();
+            _writer?.Dispose();
+        }
+        catch
+        {
+            //ignore, they shouldnt close the underlying stream, but they still try to dispose it
+        }
         Log?.Invoke("Disconnected");
     }
 
