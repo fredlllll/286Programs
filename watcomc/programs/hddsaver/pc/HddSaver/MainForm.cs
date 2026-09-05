@@ -79,9 +79,11 @@ namespace HddSaver
         {
             var mask = GetHeadMask();
             _serial.SendHeadMask(mask);
+            AppendLog("Head mask sent");
             if (byte.TryParse(txtRetries.Text, out byte retries))
             {
                 _serial.SendRetries(retries);
+                AppendLog("Retries sent");
             }
         }
         private void BtnBadMap_Click(object? sender, EventArgs e)

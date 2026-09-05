@@ -96,6 +96,7 @@ public class SerialConnection : IDisposable
         {
             SendMagic();
             _stream!.Write(bytes);
+            Log?.Invoke($"Sent message with num {num}");
             sentMessages.Add(num, bytes);
         }
     }
@@ -295,13 +296,13 @@ public class SerialConnection : IDisposable
                     uint packetNumber = _reader.ReadUInt32Exactly();
                     if (opcode == Opcode.Ack)
                     {
-                        Log?.Invoke($"ack {packetNumber}");
+                        Log?.Invoke($"ack received  {packetNumber}");
                         ConfirmReceived(packetNumber);
                         continue;
                     }
                     if (opcode == Opcode.Nack)
                     {
-                        Log?.Invoke($"nack {packetNumber}");
+                        Log?.Invoke($"nack received {packetNumber}");
                         Retransmit(packetNumber);
                         continue;
                     }
