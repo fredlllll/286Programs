@@ -28,7 +28,9 @@ namespace HddSaver
             _serial.Log += msg => Invoke(() => AppendLog(msg));
             _serial.SectorReceived += (lba, status, hasData) => Invoke(() =>
             {
-                lblStatus.Text = $"LBA {lba} {(status == 0 ? "OK" : $"0x{status:X2}")} {(hasData ? "[data]" : "")}";
+                var txt = $"LBA {lba} {(status == 0 ? "OK" : $"0x{status:X2}")} {(hasData ? "[data]" : "")}";
+                AppendLog(txt);
+                lblStatus.Text = txt;
             });
             _serial.StatusReceived += s => Invoke(() =>
             {
