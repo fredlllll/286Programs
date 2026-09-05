@@ -16,9 +16,19 @@
 //   0x7C00 .. 0x7DFF : this bootloader (exactly one sector)
 //   0x7E00 ..        : main.bin built from source/
 //
+// normally main.bin lives in segment 0 right after us. when build.py
+// compiles for a non-zero LOAD_SEG the references here are rewritten
+// so the whole program is loaded into its own 64kb segment instead
+// (e.g. 0x1000 -> physical 0x10000), which keeps bios int 13h dma
+// traffic from ever touching our stack/globals.
+//
 // the %%num_sectors%% placeholder below is replaced by build.py with
 // how many sectors main.bin occupies on the floppy image, starting
 // at sector 2 (= physically the second sector of the disk).
+// %%load_seg%% is the segment main.bin is loaded into (0 normally),
+// %%load_off%% the offset within it (0x7E00 in segment 0, right
+// behind us; a dedicated load segment has nothing at its bottom, so
+// there build.py sets it to 0).
 //
 // build.py also appends the required 55 AA signature to this code,
 // which is why you will not find it here.
@@ -30,27 +40,41 @@ void __declspec ( naked ) __declspec ( noreturn ) init (void)
 {
     __asm {
         ; ---- set up a sane cpu state --------------------------------
-        mov bp, 7C00h     ; remember where we were loaded
         xor ax, ax        ; ax = 0
-        mov ds, ax        ; data/extra/stack segment registers to 0:
-        mov es, ax        ; all addresses become flat "segment:offset"
-        mov ss, ax        ; pairs like 0000:7E00 instead of anything
-        mov sp, bp        ; stack pointer just below our own code -
+        mov ds, ax        ; for now run in segment 0 so the bios int
+        mov es, ax        ; 13h load has a conventional environment
+        mov ss, ax
+        mov sp, 7C00h     ; stack pointer just below our own code -
                           ; it grows downwards into free ram
 
         ; ---- load main.bin from the floppy --------------------------
-        ; bios int 13h, function ah=02 = "read sector(s)"
+        ; bios int 13h, function ah=02 = "read sector(s)".
+        ; destination es:bx = %%load_seg%%:%%load_off%% (the image is
+        ; loaded into its own segment, not segment 0).
+        mov ax, %%load_seg%%
+        mov es, ax
+        mov bx, %%load_off%%
         mov ah, 02h
         mov al, %%num_sectors%% ; how many sectors to read (patched in)
         mov ch, 0         ; cylinder 0
         mov cl, 2         ; start at sector 2 (we ourselves are #1)
         mov dh, 0         ; head 0
-        mov bx, 7E00h     ; destination es:bx = 0000:7E00, right after us
         int 13h           ; call the bios - dl still holds the boot
                           ; drive number the bios gave us
 
-        ; ---- hand control to the freshly loaded program -------------
-        mov ax, 7E00h
-        jmp ax            ; never returns
+        ; ---- move data/stack into the program's own segment ---------
+        ; (reload the segment into ax: bios int 13h clobbers the
+        ; registers, so we can't trust ax to still hold it here)
+        cli
+        mov ax, %%load_seg%%
+        mov ds, ax        ; data segment = %%load_seg%% (matches dgroup)
+        mov ss, ax        ; stack in the same segment
+        mov sp, 7C00h     ; grows down from %%load_seg%%:7C00
+
+        ; ---- far jump to %%load_seg%%:%%load_off%% -------------------
+        push ax           ; segment
+        mov ax, %%load_off%%
+        push ax           ; offset
+        retf              ; never returns here
     }
 }

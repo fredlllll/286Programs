@@ -58,13 +58,20 @@ void __declspec(naked) com1Isr(void)
 void initUartAndIrq(uint16_t divisor)
 {
   uint8_t pic_mask;
+  uint32_t isr_vec;
   disableInterrupts();
+
+  // The ISR runs in the program's own code segment, which is no longer
+  // forced to 0 once we relocate the image into its own segment. Grab
+  // the real CS (the segment the image is loaded into) so the IVT entry
+  // points at the actual code, not a hardcoded 0.
+  isr_vec = ((uint32_t)(uint16_t)&com1Isr) | ((uint32_t)getCs() << 16);
 
   // 1. Hook IVT Vector 0x0C directly
   old_com1_isr = readFar(0x0000, 0x0030);
 
   // 2. Set new vector to our ISR
-  writeFar(0x0000, 0x0030, (uint32_t)(uint16_t)&com1Isr); // near pointer but we are in segment 0 anyway
+  writeFar(0x0000, 0x0030, isr_vec);
 
   // 2. Set Baud Rate (Enable DLAB = 0x80)
   out8(LCR, 0x80);

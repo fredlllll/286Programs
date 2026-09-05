@@ -174,3 +174,15 @@ uint32_t readFar(uint16_t seg, uint16_t off){
 void writeFar(uint16_t seg, uint16_t off, uint32_t ptr){
   *(uint32_t __far *)MK_FP(seg, off) = ptr;
 }
+
+/* see util.h for why this exists. */
+uint16_t getCs(void)
+{
+  uint16_t cseg;
+  __asm {
+    push cs
+    pop ax
+    mov cseg, ax
+  };
+  return cseg;
+}

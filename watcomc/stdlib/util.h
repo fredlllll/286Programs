@@ -47,4 +47,9 @@ void halt(void);
 uint32_t readFar(uint16_t seg, uint16_t off);
 void writeFar(uint16_t seg, uint16_t off, uint32_t ptr);
 
+/* returns the current code segment register. used when a vector (isr)
+   lives in a program that runs in its own (possibly non-zero) segment,
+   so the interrupt vector can store the segment explicitly. */
+uint16_t getCs(void);
+
 #endif
