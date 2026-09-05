@@ -35,6 +35,7 @@ namespace HddSaver
             chkHead5 = new CheckBox();
             btnApplyConfig = new Button();
             btnBadMap = new Button();
+            btnSaveBin = new Button();
             lblRetries = new Label();
             txtRetries = new TextBox();
             lblProgress = new Label();
@@ -240,6 +241,15 @@ namespace HddSaver
             btnBadMap.Text = "Create Bad Map";
             btnBadMap.Click += BtnBadMap_Click;
             // 
+            // btnSaveBin
+            // 
+            btnSaveBin.Location = new Point(492, 3);
+            btnSaveBin.Name = "btnSaveBin";
+            btnSaveBin.Size = new Size(116, 23);
+            btnSaveBin.TabIndex = 8;
+            btnSaveBin.Text = "Save Bin Image";
+            btnSaveBin.Click += BtnSaveBin_Click;
+            // 
             // lblRetries
             // 
             lblRetries.AutoSize = true;
@@ -332,6 +342,7 @@ namespace HddSaver
             connPanel.Controls.Add(btnConnect);
             connPanel.Controls.Add(lblConnStatus);
             connPanel.Controls.Add(btnBadMap);
+            connPanel.Controls.Add(btnSaveBin);
             connPanel.Dock = DockStyle.Fill;
             connPanel.Location = new Point(3, 3);
             connPanel.Name = "connPanel";
@@ -444,6 +455,7 @@ namespace HddSaver
         private Button btnPing;
         private Button btnStatus;
         private Button btnBadMap;
+        private Button btnSaveBin;
         private CheckBox chkHead0;
         private CheckBox chkHead1;
         private CheckBox chkHead2;

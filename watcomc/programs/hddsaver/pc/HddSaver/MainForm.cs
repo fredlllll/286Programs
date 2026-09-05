@@ -90,6 +90,10 @@ namespace HddSaver
         {
             GenerateBadMap();
         }
+        private void BtnSaveBin_Click(object? sender, EventArgs e)
+        {
+            GenerateBin();
+        }
 
         private async Task ToggleConnection()
         {
@@ -160,6 +164,28 @@ namespace HddSaver
             catch (Exception ex)
             {
                 AppendLog($"Bad map failed: {ex.Message}");
+            }
+        }
+
+        private void GenerateBin()
+        {
+            using var dlg = new SaveFileDialog
+            {
+                Filter = "Raw disk image (*.bin)|*.bin",
+                DefaultExt = "bin",
+                FileName = "hdd.bin"
+            };
+            if (dlg.ShowDialog() != DialogResult.OK) return;
+
+            try
+            {
+                // Tandon geometry: 820 cyl, 6 heads, 26 spt
+                BinAssembler.Assemble(dlg.FileName, 820, 6, 26);
+                AppendLog($"Bin image saved to {dlg.FileName}");
+            }
+            catch (Exception ex)
+            {
+                AppendLog($"Bin image failed: {ex.Message}");
             }
         }
 
