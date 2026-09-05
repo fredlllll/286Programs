@@ -103,7 +103,7 @@ public class SerialConnection : IDisposable
 
     private uint GetNextMessageNum()
     {
-        return currentSentMessageNum++;
+        return Interlocked.Increment(ref currentSentMessageNum);
     }
 
     private byte[] AssembleMessage(uint num, Opcode opcode)
