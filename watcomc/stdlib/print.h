@@ -17,6 +17,7 @@
 #ifndef PRINT_H
 #define PRINT_H
 #include "intdef.h"
+#include "vmem.h"
 
 void printChar(uint8_t inChar, uint16_t pageAndColor);
 #pragma aux printChar = \

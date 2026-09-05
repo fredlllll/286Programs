@@ -14,6 +14,7 @@
 #include "protocol.h"
 #include "uart.h"
 #include "program.h"
+#include "vmem.h"
 
 void _cstart(void){
   /*shut up linker who cant find _cstart_ that it doesnt need*/
@@ -23,6 +24,8 @@ void _cstart(void){
 void main(void){
   /* initialize crc table for protocol */
   crcInit();
+
+  vmemInit();
 
   /* initialize uart: 9600 baud, 8N1 */
   initUartAndIrq(12);

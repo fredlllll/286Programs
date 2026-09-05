@@ -6,29 +6,33 @@
 static char* hexAlphabet = "0123456789ABCDEF";
 
 void print(const char* text){
-  char ch;
-  while (ch = *text++){     /* read char, advance pointer, stop at 0 */
+  vmemPrint(text);
+  /*char ch;
+  while (ch = *text++){     /* read char, advance pointer, stop at 0 
     printChar(ch, 1);
-  }
+  }*/
 }
 
 /* value >> 4 throws away the low nibble leaving the high one,
    value & 0x0F masks away everything but the low nibble */
 void printHex(uint8_t value){
-  char ch = hexAlphabet[value >> 4];
+  vmemPrintHex(value);
+  /*char ch = hexAlphabet[value >> 4];
   printChar(ch, 1);
   ch = hexAlphabet[value & 0x0F];
-  printChar(ch, 1);
+  printChar(ch, 1);*/
 }
 
 void printHexShort(uint16_t value){
-  printHex(value >> 8);         /* high byte first */
-  printHex(value & 0xFF);       /* then low byte   */
+  vmemPrintHexShort(value);
+  //printHex(value >> 8);         /* high byte first */
+  //printHex(value & 0xFF);       /* then low byte   */
 }
 
 void printHexLong(uint32_t value){
-  printHexShort(value >> 16);
-  printHexShort(value & 0xFFFF);
+  vmemPrintHexLong(value);
+  //printHexShort(value >> 16);
+  //printHexShort(value & 0xFFFF);
 }
 
 /* powers of ten up to 10^9; the largest unsigned long is about
@@ -41,6 +45,8 @@ static uint32_t pow10[10] = {1ul,10ul,100ul,1000ul,10000ul,100000ul,
    flag suppresses leading zeros but makes sure at least one digit
    (the last) always comes out */
 void printDecLong(uint32_t v){
+  vmemPrintDecLong(v);
+  /*
   char c;
   uint8_t i;
   uint8_t started;
@@ -49,7 +55,7 @@ void printDecLong(uint32_t v){
     c = '0';
     while(v >= pow10[i]){
       v -= pow10[i];
-      c++;                  /* count subtractions = next digit */
+      c++;                  // count subtractions = next digit 
     }
     if(c > '0' || started || i == 0){
       printChar(c, 1);
@@ -58,5 +64,5 @@ void printDecLong(uint32_t v){
     if(i == 0){
       break;
     }
-  }
+  }*/
 }
