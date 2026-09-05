@@ -196,12 +196,18 @@ namespace HddSaver
             {
                 using var ctx = new HddSaverContext();
                 var count = ctx.Sectors.Count();
-                var errors = ctx.Sectors.Count(s => !SectorStatus.HasData(s.Status) && s.Status != SectorStatus.HeadSkip);
+                var errors = ctx.Sectors.Count(s =>
+                    s.Status != SectorStatus.Ok &&
+                    s.Status != SectorStatus.Ecc &&
+                    s.Status != SectorStatus.HeadSkip);
                 lblProgress.Text = $"Sectors: {count}";
                 lblSectorsReceived.Text = $"Received: {count}";
                 lblErrors.Text = $"Errors: {errors}";
             }
-            catch { }
+            catch (Exception ex)
+            {
+                AppendLog($"Progress refresh failed: {ex.Message}");
+            }
         }
 
         private void AppendLog(string message)
