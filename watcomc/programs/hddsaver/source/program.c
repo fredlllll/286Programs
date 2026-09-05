@@ -73,10 +73,26 @@ static void printCmd(uint8_t cmd)
   }
 }
 
-static bool ExpectAck(uint32_t packetNum)
+/* ack handshake robustness. a sector packet is resent up to ACK_RETRIES
+   times unless its ack arrives within the per-try timeout. the old code
+   waited for the exact ack forever with no resend, so a single truncated
+   ack (e.g. a byte dropped crossing the rts gate in sendOneSector) or a
+   nak wedged the dump permanently at ~1000 sectors. */
+#define ACK_RETRIES 4
+
+/* wait up to timeoutTicks for the pc's ack of packetNum. unrelated
+   commands are still parsed and answered, so ping/status/stop keep
+   working while a sector is being chased. returns TRUE when packetNum
+   is acked, FALSE on nak or timeout (caller resends the packet) */
+static bool waitForAck(uint32_t packetNum, uint32_t timeoutTicks)
 {
-  while (checkCommand(1 SECONDS))
+  uint32_t start = biosTicks();
+  while (biosTicks() - start < timeoutTicks)
   {
+    if (!checkCommand(1 SECONDS))
+    {
+      continue;
+    }
     if (lastAck == packetNum)
     {
       return TRUE;
@@ -90,20 +106,27 @@ static bool ExpectAck(uint32_t packetNum)
 }
 
 /* send one sector: header always, data only if read was successful.
-   waits for ack/nak. returns 1 if ok to continue, 0 if stopped */
+   waits for the ack, resending the same packet (same number) on nak or
+   timeout instead of blocking forever. */
 static void sendOneSector(void)
 {
   uint8_t status;
   uint32_t packetNum;
+  uint8_t attempt;
 
   /* head masked out this pass: never touch the drive, just emit a
      header-only skip descriptor so the assembler knows it wasn't
      attempted (ST_HEADSKIP, see recovery/structures.py) */
   if ((headMask & (1 << hddPos.head)) == 0)
   {
-    packetNum = sendSectorHeaderOnly(ST_HEADSKIP, hddPos.lba);
-    while (!ExpectAck(packetNum))
-      ;
+    for (attempt = 0; attempt < ACK_RETRIES; attempt++)
+    {
+      packetNum = sendSectorHeaderOnly(ST_HEADSKIP, hddPos.lba);
+      if (waitForAck(packetNum, 2 SECONDS))
+      {
+        break;
+      }
+    }
     advanceHddPosition();
     return;
   }
@@ -113,9 +136,11 @@ static void sendOneSector(void)
   status = readHddResilient(sectorBuf);
   uartSetRts(TRUE);
 
-  /* send header + data (if success) or header only (if failure) */
-  // dont do retransmission here, serial faults extremely unlikely, just blocks the program and is hard to implement properly
-  // do
+  /* send header + data (if success) or header only (if failure).
+     every try waits for its exact ack; a missing ack or a nak means the
+     pc didn't confirm this packet, so send it again (a duplicate row on
+     the pc is harmless - assembly prefers data) before giving up. */
+  for (attempt = 0; attempt < ACK_RETRIES; attempt++)
   {
     if (isStatusSuccess(status))
     {
@@ -125,9 +150,18 @@ static void sendOneSector(void)
     {
       packetNum = sendSectorHeaderOnly(status, hddPos.lba);
     }
+    if (waitForAck(packetNum, 2 SECONDS))
+    {
+      break;
+    }
   }
-  while (!ExpectAck(packetNum))
-    ;
+
+  if (attempt == ACK_RETRIES)
+  {
+    print("give up, no ack for lba ");
+    printDecLong(hddPos.lba);
+    print("\r\n");
+  }
 
   advanceHddPosition();
 }
