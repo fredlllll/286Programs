@@ -80,6 +80,54 @@ void vmemPrint(const char *text)
     }
 }
 
-/* same hex/decimal digit logic as print.c, just call vmemPutChar
-   instead of printChar — copy printHex/printHexShort/printHexLong/
-   printDecLong over verbatim with that one substitution */
+/* lookup table for hex nibbles: index 0..15 -> character '0'..'F'. */
+static char* hexAlphabet = "0123456789ABCDEF";
+
+void vmemPrintHex(uint8_t value)
+{
+    vmemPutChar(hexAlphabet[value >> 4]);
+    vmemPutChar(hexAlphabet[value & 0x0F]);
+}
+
+void vmemPrintHexShort(uint16_t value)
+{
+    vmemPrintHex((uint8_t)(value >> 8));   /* high byte first */
+    vmemPrintHex((uint8_t)(value & 0xFF)); /* then low byte   */
+}
+
+void vmemPrintHexLong(uint32_t value)
+{
+    vmemPrintHexShort((uint16_t)(value >> 16));
+    vmemPrintHexShort((uint16_t)(value & 0xFFFF));
+}
+
+/* powers of ten up to 10^9; the largest unsigned long is about
+   4.29 * 10^9, so ten entries are enough */
+static uint32_t pow10[10] = {1ul,10ul,100ul,1000ul,10000ul,100000ul,
+                             1000000ul,10000000ul,100000000ul,1000000000ul};
+
+/* prints v in decimal without any division: for each power of ten,
+   count how often it fits by subtracting over and over. the "started"
+   flag suppresses leading zeros but makes sure at least one digit
+   (the last) always comes out */
+void vmemPrintDecLong(uint32_t v)
+{
+    char c;
+    uint8_t i;
+    uint8_t started;
+    started = 0;
+    for (i = 9;; i--){
+        c = '0';
+        while (v >= pow10[i]){
+            v -= pow10[i];
+            c++;                  /* count subtractions = next digit */
+        }
+        if (c > '0' || started || i == 0){
+            vmemPutChar(c);
+            started = 1;
+        }
+        if (i == 0){
+            break;
+        }
+    }
+}
