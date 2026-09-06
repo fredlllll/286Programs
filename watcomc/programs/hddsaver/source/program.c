@@ -109,14 +109,20 @@ static void sendOneSector(void)
   uint32_t packetNum;
   uint8_t attempt;
 
-  /* head masked out: skip the whole sector without touching the drive or
-     the wire. an untransmitted sector is indistinguishable from a missing
-     one downstream (zero-filled in the assembled image), so a skip
-     descriptor would only waste serial bandwidth - exactly the slow-down
-     the head mask is meant to avoid when dumping one head at a time */
+  /* head masked out: skip the sector without touching the drive or the
+     wire. an untransmitted sector is indistinguishable from a missing one
+     downstream (zero-filled in the assembled image), so a skip descriptor
+     would only waste serial bandwidth. also blaze across the whole run of
+     masked sectors in one pass instead of one lba per loop() round -
+     with a single head enabled that used to cost the else-heavy poll
+     below for every one of the other heads' sectors. */
   if ((headMask & (1 << hddPos.head)) == 0)
   {
-    advanceHddPosition();
+    while (hddPos.lba < hddGeom.totalSectors &&
+           (headMask & (1 << hddPos.head)) == 0)
+    {
+      advanceHddPosition();
+    }
     return;
   }
 
@@ -326,7 +332,14 @@ void program(void)
         ;
       break;
     case STATE_RUN:
-      while (checkCommand(1))
+      /* drain blocked pc commands, but never idle-wait for a fresh one:
+         with no sector acks in flight (e.g. while blazing over masked
+         heads) a 1-tick checkCommand poll here would stall every
+         loop() round ~55-110ms. gating on uartRxReady keeps the drain
+         instant when the fifo is empty; buffered commands still resolve
+         checkCommand immediately. a stop/ping sent mid-transfer is
+         already parsed inside waitForAck, so nothing is dropped. */
+      while (uartRxReady() && checkCommand(1))
         ;
       loop();
       break;
