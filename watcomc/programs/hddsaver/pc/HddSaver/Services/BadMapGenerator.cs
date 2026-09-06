@@ -26,6 +26,7 @@ public static class BadMapGenerator
     {
         int total = cyls * heads * spt;
         var state = new byte[total]; // 0 = untouched
+        long lastLba = -1;
 
         using var ctx = new HddSaverContext();
         var sectors = ctx.Sectors.ToList();
@@ -33,6 +34,7 @@ public static class BadMapGenerator
         foreach (var sec in sectors)
         {
             if (sec.Lba >= total) continue;
+            if (sec.Lba > lastLba) lastLba = sec.Lba;
             if (SectorStatus.HasData(sec.Status))
             {
                 state[sec.Lba] = 1; // readable
@@ -52,11 +54,20 @@ public static class BadMapGenerator
         }
 
         int cw = 3, ch = 12;   // pixel size of one sector cell
-        int ml = 56, mt = 78;  // left margin / top offset
+        int ml = 76, mt = 78;  // left margin / top offset
         int panelGap = 18, tickH = 14;
         int W = ml + cyls * cw + 14;
         int panelH = spt * ch + tickH;
         int Ht = mt + heads * (panelH + panelGap);
+
+        int lastCyl = -1, lastHead = -1, lastSec = -1;
+        if (lastLba >= 0)
+        {
+            lastCyl = (int)(lastLba / (heads * spt));
+            int rem = (int)(lastLba % (heads * spt));
+            lastHead = rem / spt;
+            lastSec = rem % spt;
+        }
 
         var outLines = new List<string>
         {
@@ -80,6 +91,11 @@ public static class BadMapGenerator
         foreach (var b in state) cnt[b]++;
         outLines.Add($"<text x=\"{ml}\" y=\"66\" font-size=\"11\" fill=\"#222\">" +
                      $"{cnt[1]} readable | {cnt[2]} read-failed | {cnt[3]} head-masked | {cnt[0]} not attempted</text>");
+        if (lastLba >= 0)
+        {
+            outLines.Add($"<text x=\"{ml + 320}\" y=\"66\" font-size=\"11\" font-weight=\"bold\" fill=\"#40414f\">" +
+                         $"| ends at lba {lastLba} (head {lastHead} sec {lastSec} cyl {lastCyl})</text>");
+        }
 
         // per-head panels
         for (int h = 0; h < heads; h++)
@@ -94,6 +110,12 @@ public static class BadMapGenerator
                 outLines.Add($"<line x1=\"{ml + c * cw}\" y1=\"{gy}\" x2=\"{ml + c * cw}\" y2=\"{gy + spt * ch}\" stroke=\"#dddddd\"/>");
             }
 
+            // sector number axis
+            for (int sec = 0; sec < spt; sec += 5)
+            {
+                outLines.Add($"<text x=\"{ml - 24}\" y=\"{gy + sec * ch + 9}\" font-size=\"9\" text-anchor=\"end\" fill=\"#666\">{sec}</text>");
+            }
+
             // sector rows
             for (int sec = 0; sec < spt; sec++)
             {
@@ -106,7 +128,10 @@ public static class BadMapGenerator
                     while (x2 < cyls && state[(x2 * heads + h) * spt + sec] == st)
                         x2++;
                     int w = (x2 - x) * cw;
-                    outLines.Add($"<rect x=\"{ml + x * cw}\" y=\"{ry}\" width=\"{w}\" height=\"{ch}\" fill=\"{MapColors[st]}\"/>");
+                    int lba0 = (x * heads + h) * spt + sec;
+                    int lba1 = ((x2 - 1) * heads + h) * spt + sec;
+                    outLines.Add($"<rect x=\"{ml + x * cw}\" y=\"{ry}\" width=\"{w}\" height=\"{ch}\" fill=\"{MapColors[st]}\">" +
+                                 $"<title>lba {lba0}-{lba1}</title></rect>");
                     x = x2;
                 }
             }
@@ -116,6 +141,15 @@ public static class BadMapGenerator
             {
                 outLines.Add($"<text x=\"{ml + c * cw}\" y=\"{gy + spt * ch + 11}\" font-size=\"9\" fill=\"#666\">{c}</text>");
             }
+        }
+
+        // high-visibility marker for the last lba that actually got recorded
+        if (lastLba >= 0)
+        {
+            int mx = ml + lastCyl * cw;
+            int my = mt + lastHead * (panelH + panelGap) + 16 + lastSec * ch;
+            outLines.Add($"<rect x=\"{mx}\" y=\"{my}\" width=\"{cw}\" height=\"{ch}\" fill=\"none\" stroke=\"#cc0000\" stroke-width=\"2\">" +
+                         $"<title>last lba {lastLba}</title></rect>");
         }
 
         outLines.Add("</svg>");
