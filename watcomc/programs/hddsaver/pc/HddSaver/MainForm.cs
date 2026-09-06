@@ -161,9 +161,9 @@ namespace HddSaver
         {
             using var dlg = new SaveFileDialog
             {
-                Filter = "SVG files (*.svg)|*.svg",
-                DefaultExt = "svg",
-                FileName = "badmap.svg"
+                Filter = "HTML map (*.html)|*.html",
+                DefaultExt = "html",
+                FileName = "badmap.html"
             };
             if (dlg.ShowDialog() != DialogResult.OK) return;
 
