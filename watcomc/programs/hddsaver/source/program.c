@@ -109,19 +109,13 @@ static void sendOneSector(void)
   uint32_t packetNum;
   uint8_t attempt;
 
-  /* head masked out this pass: never touch the drive, just emit a
-     header-only skip descriptor so the assembler knows it wasn't
-     attempted (ST_HEADSKIP, see recovery/structures.py) */
+  /* head masked out: skip the whole sector without touching the drive or
+     the wire. an untransmitted sector is indistinguishable from a missing
+     one downstream (zero-filled in the assembled image), so a skip
+     descriptor would only waste serial bandwidth - exactly the slow-down
+     the head mask is meant to avoid when dumping one head at a time */
   if ((headMask & (1 << hddPos.head)) == 0)
   {
-    for (attempt = 0; attempt < ACK_RETRIES; attempt++)
-    {
-      packetNum = sendSectorHeaderOnly(ST_HEADSKIP, hddPos.lba);
-      if (waitForAck(packetNum, 2 SECONDS))
-      {
-        break;
-      }
-    }
     advanceHddPosition();
     return;
   }

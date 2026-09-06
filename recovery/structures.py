@@ -15,7 +15,9 @@ from dataclasses import dataclass, field
 
 ST_OK: int = 0x00               # read clean, data present
 ST_ECC: int = 0x11              # read after ecc correction, data present
-ST_HEADSKIP: int = 0xFE         # head masked out this pass, never attempted
+ST_HEADSKIP: int = 0xFE         # legacy: head masked out, never attempted.
+                                # current firmware just doesn't transmit those sectors,
+                                # but old dumps may still carry this status
 
 
 def has_data(status: int) -> bool:
