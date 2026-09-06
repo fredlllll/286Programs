@@ -128,10 +128,7 @@ public static class BadMapGenerator
                     while (x2 < cyls && state[(x2 * heads + h) * spt + sec] == st)
                         x2++;
                     int w = (x2 - x) * cw;
-                    int lba0 = (x * heads + h) * spt + sec;
-                    int lba1 = ((x2 - 1) * heads + h) * spt + sec;
-                    outLines.Add($"<rect x=\"{ml + x * cw}\" y=\"{ry}\" width=\"{w}\" height=\"{ch}\" fill=\"{MapColors[st]}\">" +
-                                 $"<title>lba {lba0}-{lba1}</title></rect>");
+                    outLines.Add($"<rect x=\"{ml + x * cw}\" y=\"{ry}\" width=\"{w}\" height=\"{ch}\" fill=\"{MapColors[st]}\"/>");
                     x = x2;
                 }
             }
@@ -148,8 +145,37 @@ public static class BadMapGenerator
         {
             int mx = ml + lastCyl * cw;
             int my = mt + lastHead * (panelH + panelGap) + 16 + lastSec * ch;
-            outLines.Add($"<rect x=\"{mx}\" y=\"{my}\" width=\"{cw}\" height=\"{ch}\" fill=\"none\" stroke=\"#cc0000\" stroke-width=\"2\">" +
-                         $"<title>last lba {lastLba}</title></rect>");
+            outLines.Add($"<rect x=\"{mx}\" y=\"{my}\" width=\"{cw}\" height=\"{ch}\" fill=\"none\" stroke=\"#cc0000\" stroke-width=\"2\"/>");
+        }
+
+        // interactive overlay: hovering anywhere shows the exact lba under
+        // the cursor in a live readout (no per-run tooltips, those show a
+        // useless merged range). runs are merged per bar, so at 3px wide
+        // you can't aim a default tooltip at a single sector anyway.
+        if (lastLba >= 0)
+        {
+            int plotW = cyls * cw;
+            int plotH = heads * panelH + (heads - 1) * panelGap;
+            int panelStep = panelH + panelGap;
+            outLines.Add($"<text id=\"readout\" x=\"{ml + plotW}\" y=\"66\" text-anchor=\"end\" font-size=\"11\" font-weight=\"bold\" fill=\"#000\">LBA -</text>");
+            outLines.Add($"<rect id=\"overlay\" x=\"{ml}\" y=\"{mt}\" width=\"{plotW}\" height=\"{plotH}\" fill=\"none\" pointer-events=\"all\" onmousemove=\"place(evt)\" onmouseleave=\"hide()\"/>");
+            outLines.Add($"<rect id=\"hover\" x=\"0\" y=\"0\" width=\"0\" height=\"{ch}\" fill=\"none\" stroke=\"#000\" stroke-width=\"2\" pointer-events=\"none\"/>");
+            outLines.Add($@"<script type=""text/javascript""><![CDATA[
+var S=document.querySelector('svg'),O=document.getElementById('overlay'),H=document.getElementById('hover'),T=document.getElementById('readout');
+function place(evt){{
+var p0=S.createSVGPoint();p0.x=evt.clientX;p0.y=evt.clientY;
+var ctm=S.getScreenCTM();if(!ctm)return;
+var p=p0.matrixTransform(ctm.inverse());
+var ix=p.x-{ml},iy=p.y-{mt};
+var cyl=Math.floor(ix/{cw});if(cyl<0)cyl=0;if(cyl>{cyls}-1)cyl={cyls}-1;
+var h=Math.floor(iy/{panelStep});if(h<0)h=0;if(h>{heads}-1)h={heads}-1;
+var sec=Math.floor((iy-h*{panelStep}-16)/{ch});if(sec<0)sec=0;if(sec>{spt}-1)sec={spt}-1;
+var lba=(cyl*{heads}+h)*{spt}+sec;
+H.setAttribute('x',{ml}+cyl*{cw});H.setAttribute('y',{mt}+h*{panelStep}+16+sec*{ch});H.setAttribute('width',{cw});H.setAttribute('height',{ch});
+T.textContent='LBA '+lba+' | head '+h+' | sec '+sec+' | cyl '+cyl;
+}}
+function hide(){{T.textContent='';H.setAttribute('width','0');}}
+]]></script>");
         }
 
         outLines.Add("</svg>");
