@@ -116,18 +116,16 @@ static void sendOneSector(void)
      masked sectors in one pass instead of one lba per loop() round -
      with a single head enabled that used to cost the else-heavy poll
      below for every one of the other heads' sectors. */
-  if ((headMask & (1 << hddPos.head)) == 0)
+  while (hddPos.lba < hddGeom.totalSectors && (headMask & (1 << hddPos.head)) == 0)
   {
-    while (hddPos.lba < hddGeom.totalSectors &&
-           (headMask & (1 << hddPos.head)) == 0)
-    {
-      advanceHddPosition();
-    }
+    advanceHddPosition();
+  }
+  if(hddPos.lba >= hddGeom.totalSectors){
     return;
   }
 
   /* read the hdd sector */
-  uartSetRts(FALSE); //signal we cant receive during hdd read
+  uartSetRts(FALSE); // signal we cant receive during hdd read
   status = readHddResilient(sectorBuf);
   uartSetRts(TRUE);
 
