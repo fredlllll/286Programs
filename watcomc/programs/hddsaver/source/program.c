@@ -112,10 +112,11 @@ static void sendOneSector(void)
   /* head masked out: skip the sector without touching the drive or the
      wire. an untransmitted sector is indistinguishable from a missing one
      downstream (zero-filled in the assembled image), so a skip descriptor
-     would only waste serial bandwidth. also blaze across the whole run of
-     masked sectors in one pass instead of one lba per loop() round -
-     with a single head enabled that used to cost the else-heavy poll
-     below for every one of the other heads' sectors. */
+     would only waste serial bandwidth. blaze across the whole run of
+     masked sectors in one pass instead of one lba per loop() round, then
+     fall straight into sending the next enabled sector. with a single
+     head enabled that used to mean a lengthy poll per lba of the masked
+     heads, and a whole extra loop() round for every masked span. */
   while (hddPos.lba < hddGeom.totalSectors && (headMask & (1 << hddPos.head)) == 0)
   {
     advanceHddPosition();
