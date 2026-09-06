@@ -22,6 +22,7 @@ public class SerialConnection : IDisposable
     private const int AckTimeoutMs = 750; // generous: a sector transfer alone can
                                           // take ~550ms at 9600 baud, plus disk time
     private const int MaxRetries = 10;
+    private const int ReadTimeoutMs = 5000;
 
     private Stream? _stream;
     private object _streamWriterLock = new();
@@ -159,7 +160,7 @@ public class SerialConnection : IDisposable
         _port = new SerialPort(portName, baudRate, Parity.None, 8, StopBits.One)
         {
             WriteTimeout = 5000,
-            ReadTimeout = 5000,
+            ReadTimeout = ReadTimeoutMs,
             Handshake = Handshake.RequestToSend
         };
         _port.Open();
@@ -177,9 +178,23 @@ public class SerialConnection : IDisposable
         _retryTimer?.Dispose();
         _retryTimer = null;
         StopReceiving();
-        _stream?.Close();
+        try
+        {
+            _stream?.Close();
+        }
+        catch (Exception ex)
+        {
+            Log?.Invoke($"closing stream: {ex.GetType().Name}: {ex.Message}");
+        }
         _stream = null;
-        _port?.Dispose();
+        try
+        {
+            _port?.Dispose();
+        }
+        catch (Exception ex)
+        {
+            Log?.Invoke($"disposing port: {ex.GetType().Name}: {ex.Message}");
+        }
         _port = null;
         try
         {
@@ -275,8 +290,18 @@ public class SerialConnection : IDisposable
         _running = false;
         if (_thread != null)
         {
-            _thread.Interrupt();
-            _thread.Join();
+            // Graceful stop: do NOT interrupt a blocking serial read. The
+            // reader exits on its own as soon as its pending read completes
+            // (data arrives or ReadTimeout elapses) and the loop sees
+            // _running == false. Interrupting leaves the overlapped read
+            // pending; closing the stream afterwards crashes the process with
+            // an ObjectDisposedException from a SerialStream.AsyncFSCallback
+            // thread-pool completion callback.
+            if (!_thread.Join(TimeSpan.FromMilliseconds(ReadTimeoutMs + 500)))
+            {
+                _thread.Interrupt();
+                _thread.Join();
+            }
             _thread = null;
         }
     }
@@ -475,12 +500,23 @@ public class SerialConnection : IDisposable
 
         foreach (var (num, bytes) in toResend)
         {
-            lock (_streamWriterLock)
+            try
             {
-                SendMagic();
-                _stream!.Write(bytes);
+                lock (_streamWriterLock)
+                {
+                    if (_stream == null)
+                    {
+                        return; // connection is being torn down
+                    }
+                    SendMagic();
+                    _stream.Write(bytes);
+                }
+                Log?.Invoke($"Resending message {num} (no ack yet)");
             }
-            Log?.Invoke($"Resending message {num} (no ack yet)");
+            catch (Exception ex)
+            {
+                Log?.Invoke($"retransmit failed: {ex.GetType().Name}: {ex.Message}");
+            }
         }
     }
 }
