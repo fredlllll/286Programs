@@ -62,7 +62,7 @@ uint8_t readHddResilient(void __far *dest)
       resetDiskSystem(0x80); /* clean up controller state for next sector */
     }
 
-    print("HDD read fail CHS ");
+    print("\r\nHDD read fail CHS ");
     printDecLong(hddPos.cyl);
     printChar('/', 1);
     printDecLong(hddPos.head);
