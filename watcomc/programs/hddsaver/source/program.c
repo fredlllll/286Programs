@@ -305,10 +305,17 @@ bool checkCommand(uint32_t timeout)
   }
   break;
   case CMD_PARK:
-    seekHdd(0);
-    print("\r\nParked at lba ");
-    printDecLong(hddPos.lba);
-    break;
+  {
+    uint8_t status = parkHeads(0x80);
+    if (status == 0x00)
+      print("\r\nParked");
+    else
+    {
+      print("\r\nPark failed: ");
+      printInt13Status(status);
+    }
+  }
+  break;
   }
   return TRUE;
 }

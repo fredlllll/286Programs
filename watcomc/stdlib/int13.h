@@ -21,6 +21,8 @@
 
 void resetDiskSystem(uint8_t driveNumber);
 
+uint8_t parkHeads(uint8_t driveNumber);
+
 uint8_t readFromDrive(uint8_t numSectorsToRead, uint16_t cylinder,
     uint8_t head, uint8_t sector, uint8_t driveNumber, void __far *destination);
 
