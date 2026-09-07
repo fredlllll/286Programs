@@ -308,11 +308,19 @@ bool checkCommand(uint32_t timeout)
   {
     uint8_t status = parkHeads(0x80);
     if (status == 0x00)
-      print("\r\nParked");
+    {
+      print("\r\nParked (BIOS AH=19h)");
+    }
     else
     {
-      print("\r\nPark failed: ");
-      printInt13Status(status);
+      status = recalibrateDrive(0x80);
+      if (status == 0x00)
+        print("\r\nParked (recalibrate AH=11h)");
+      else
+      {
+        print("\r\nSeeking to cyl 0");
+        seekHdd(0);
+      }
     }
   }
   break;

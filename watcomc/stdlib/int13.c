@@ -20,6 +20,17 @@ uint8_t parkHeads(uint8_t driveNumber){
   return status;
 }
 
+uint8_t recalibrateDrive(uint8_t driveNumber){
+  volatile uint8_t status;
+  _asm{
+    mov ah, 0x11
+    mov dl, driveNumber
+    int 0x13
+    mov status, ah
+  };
+  return status;
+}
+
 uint8_t readFromDrive(uint8_t numSectorsToRead, uint16_t cylinder,
     uint8_t head, uint8_t sector, uint8_t driveNumber, void __far *destination){
   volatile uint8_t status;
