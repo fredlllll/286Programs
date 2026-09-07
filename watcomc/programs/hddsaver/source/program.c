@@ -65,6 +65,9 @@ static void printCmd(uint8_t cmd)
   case CMD_RESETS:
     print("\r\n[cmd] RESETS");
     break;
+  case CMD_PARK:
+    print("\r\n[cmd] PARK");
+    break;
   case CMD_ACK:
     print("\r\n[cmd] ACK");
     break;
@@ -301,6 +304,11 @@ bool checkCommand(uint32_t timeout)
     }
   }
   break;
+  case CMD_PARK:
+    seekHdd(0);
+    print("\r\nParked at lba ");
+    printDecLong(hddPos.lba);
+    break;
   }
   return TRUE;
 }

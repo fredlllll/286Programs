@@ -288,6 +288,13 @@ public class SerialConnection : IDisposable
         SendMessage(num, body);
     }
 
+    public void SendPark()
+    {
+        var num = GetNextMessageNum();
+        var body = AssembleMessage(num, Opcode.Park);
+        SendMessage(num, body);
+    }
+
     public void StartReceiving()
     {
         StopReceiving();

@@ -71,6 +71,11 @@ namespace HddSaver
             _serial.SendPing();
             AppendLog("Ping sent");
         }
+        private async void BtnPark_Click(object? sender, EventArgs e)
+        {
+            _serial.SendPark();
+            AppendLog("Park sent");
+        }
         private async void BtnStatus_Click(object? sender, EventArgs e)
         {
             _serial.QueryStatus();

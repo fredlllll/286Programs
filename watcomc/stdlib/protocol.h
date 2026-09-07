@@ -14,7 +14,8 @@
      0x08  SEND_STATUS 286 sends STATUS reply
      0x09  STATUS      286->PC status reply opcode
      0x0a  SECTOR      286->PC sector packet
-     0x0b  RESETS      set controller-resets flag (1 byte)
+      0x0b  RESETS      set controller-resets flag (1 byte)
+      0x0c  PARK        park heads (seek to cyl 0)
 
    responses (PC -> 286, after each message):
      0xFE  ACK         packet OK
@@ -36,6 +37,7 @@
 #define CMD_STATUS 0x09
 #define CMD_SECTOR 0x0a
 #define CMD_RESETS 0x0b
+#define CMD_PARK 0x0c
 
 #define CMD_ACK 0xFE
 #define CMD_NACK 0xCC

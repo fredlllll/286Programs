@@ -26,6 +26,7 @@ namespace HddSaver
             txtSeekLba = new TextBox();
             btnSeek = new Button();
             btnPing = new Button();
+            btnPark = new Button();
             btnStatus = new Button();
             chkHead0 = new CheckBox();
             chkHead1 = new CheckBox();
@@ -150,6 +151,16 @@ namespace HddSaver
             btnStatus.TabIndex = 6;
             btnStatus.Text = "Status";
             btnStatus.Click += BtnStatus_Click;
+            // 
+            // btnPark
+            // 
+            btnPark.Enabled = false;
+            btnPark.Location = new Point(527, 3);
+            btnPark.Name = "btnPark";
+            btnPark.Size = new Size(70, 23);
+            btnPark.TabIndex = 7;
+            btnPark.Text = "Park";
+            btnPark.Click += BtnPark_Click;
             // 
             // chkHead0
             // 
@@ -370,6 +381,7 @@ namespace HddSaver
             ctrlPanel.Controls.Add(btnSeek);
             ctrlPanel.Controls.Add(btnPing);
             ctrlPanel.Controls.Add(btnStatus);
+            ctrlPanel.Controls.Add(btnPark);
             ctrlPanel.Dock = DockStyle.Fill;
             ctrlPanel.Location = new Point(3, 43);
             ctrlPanel.Name = "ctrlPanel";
@@ -465,6 +477,7 @@ namespace HddSaver
         private TextBox txtSeekLba;
         private Button btnSeek;
         private Button btnPing;
+        private Button btnPark;
         private Button btnStatus;
         private Button btnBadMap;
         private Button btnSaveBin;
