@@ -28,7 +28,7 @@ uint8_t isStatusSuccess(uint8_t status)
 }
 
 /* reads one hdd sector. retries up to hddRetries times (configurable,
-   0 = single attempt). resets only kick in when retrying is enabled:
+   0 = single attempt). controller resets only happen with 2+ retries:
    a bios disk reset recalibrates the drive (loud seek to cylinder 0
    and back), which we avoid on a drive with weak heads.
 
@@ -42,11 +42,12 @@ uint8_t readHddResilient(void __far *dest)
 {
   uint8_t tries;
   uint8_t status;
+  uint8_t resetsEnabled = hddRetries >= 2 ? 1 : 0;
 
   tries = 0;
   do
   {
-    if (hddRetries > 1 && tries == hddRetries / 2)
+    if (resetsEnabled && tries == hddRetries / 2)
     {
       resetDiskSystem(0x80); /* halfway through, try with a reset */
     }
@@ -54,7 +55,7 @@ uint8_t readHddResilient(void __far *dest)
     tries++;
   } while (!isStatusSuccess(status) && tries < hddRetries);
 
-  if (!isStatusSuccess(status))
+  if (!isStatusSuccess(status) && resetsEnabled)
   {
     resetDiskSystem(0x80); /* clean up controller state for next sector */
 
