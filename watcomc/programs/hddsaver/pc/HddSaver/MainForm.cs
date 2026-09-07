@@ -137,6 +137,7 @@ namespace HddSaver
             btnStop.Enabled = enabled;
             btnSeek.Enabled = enabled;
             btnPing.Enabled = enabled;
+            btnPark.Enabled = enabled;
             btnStatus.Enabled = enabled;
             btnApplyConfig.Enabled = enabled;
         }
