@@ -55,9 +55,12 @@ uint8_t readHddResilient(void __far *dest)
     tries++;
   } while (!isStatusSuccess(status) && tries < hddRetries);
 
-  if (!isStatusSuccess(status) && resetsEnabled)
+  if (!isStatusSuccess(status))
   {
-    resetDiskSystem(0x80); /* clean up controller state for next sector */
+    if (resetsEnabled)
+    {
+      resetDiskSystem(0x80); /* clean up controller state for next sector */
+    }
 
     print("HDD read fail CHS ");
     printDecLong(hddPos.cyl);
