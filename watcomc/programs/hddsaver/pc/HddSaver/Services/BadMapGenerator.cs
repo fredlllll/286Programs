@@ -8,18 +8,18 @@ public static class BadMapGenerator
 {
     private static readonly Dictionary<int, string> MapColors = new()
     {
-        { 0, "#bdbdbd" }, // not attempted
-        { 1, "#2ea44f" }, // readable
-        { 2, "#d93025" }, // hdd read failed
-        { 3, "#e08a00" }, // head masked
+        { 0, "#bdbdbd" }, // not attempted / missing
+        { 1, "#2ea44f" }, // ok (0x00)
+        { 2, "#a5d6a7" }, // ecc corrected (0x11), lighter green
+        { 3, "#d93025" }, // hdd read failed
     };
 
     private static readonly Dictionary<int, string> MapNames = new()
     {
-        { 0, "not attempted" },
-        { 1, "readable" },
-        { 2, "hdd read failed" },
-        { 3, "head masked" },
+        { 0, "missing" },
+        { 1, "ok" },
+        { 2, "ecc corrected" },
+        { 3, "read failed" },
     };
 
     public static void Generate(string outputPath, int cyls, int heads, int spt)
@@ -35,22 +35,17 @@ public static class BadMapGenerator
         {
             if (sec.Lba >= total) continue;
             if (sec.Lba > lastLba) lastLba = sec.Lba;
-            if (SectorStatus.HasData(sec.Status))
+            if (sec.Status == SectorStatus.HeadSkip) continue; // head masked: ignored entirely
+            byte lvl = sec.Status switch
             {
-                state[sec.Lba] = 1; // readable
-            }
-            else if (sec.Status == SectorStatus.HeadSkip)
-            {
-                // head skip — treat as head-masked, never clobber a good read
-                if (state[sec.Lba] == 0)
-                    state[sec.Lba] = 3;
-            }
-            else
-            {
-                // read failed, but a good read anywhere wins over it
-                if (state[sec.Lba] < 2)
-                    state[sec.Lba] = 2;
-            }
+                SectorStatus.Ok => 1,  // green
+                SectorStatus.Ecc => 2, // lighter green
+                _ => 3,                // red: any other bios error code
+            };
+            // lower value = better read; a clean read anywhere wins over an
+            // ecc-corrected one, which wins over an error
+            if (state[sec.Lba] == 0 || lvl < state[sec.Lba])
+                state[sec.Lba] = lvl;
         }
 
         int ml = 76, mt = 78;  // left margin / top offset
@@ -109,7 +104,7 @@ public static class BadMapGenerator
         o.Add($"  <div class=\"toolbar\"><label for=\"cz\" >Cell size:</label>" +
               "<input id=\"cz\" type=\"range\" min=\"2\" max=\"14\" step=\"1\" value=\"3\">" +
               "<output id=\"czv\"></output></div>");
-        o.Add($"  <div class=\"counts\">{cnt[1]} readable | {cnt[2]} read-failed | {cnt[3]} head-masked | {cnt[0]} not attempted" +
+        o.Add($"  <div class=\"counts\">{cnt[1]} ok | {cnt[2]} ecc corrected | {cnt[3]} read failed | {cnt[0]} missing" +
               (lastLba >= 0 ? $" <b>| ends at lba {lastLba} (head {lastHead} sec {lastSec} cyl {lastCyl})</b>" : "") + "</div>");
         o.Add("  <div class=\"readout\" id=\"readout\">LBA -</div>");
         o.Add("</header>");
