@@ -64,9 +64,9 @@ uint8_t readHddResilient(void __far *dest)
 
     print("\r\nHDD read fail CHS ");
     printDecLong(hddPos.cyl);
-    printChar('/', 1);
+    print("/");
     printDecLong(hddPos.head);
-    printChar('/', 1);
+    print("/");
     printDecLong(hddPos.sec);
     print(" LBA: ");
     printDecLong(hddPos.lba);
