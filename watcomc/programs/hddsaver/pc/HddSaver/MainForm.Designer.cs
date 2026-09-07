@@ -38,6 +38,7 @@ namespace HddSaver
             btnSaveBin = new Button();
             lblRetries = new Label();
             txtRetries = new TextBox();
+            chkResets = new CheckBox();
             lblProgress = new Label();
             lblSectorsReceived = new Label();
             lblErrors = new Label();
@@ -268,6 +269,16 @@ namespace HddSaver
             txtRetries.TabIndex = 8;
             txtRetries.Text = "5";
             // 
+            // chkResets
+            // 
+            chkResets.AutoSize = true;
+            chkResets.Location = new Point(389, 6);
+            chkResets.Margin = new Padding(16, 6, 0, 0);
+            chkResets.Name = "chkResets";
+            chkResets.Size = new Size(150, 19);
+            chkResets.TabIndex = 10;
+            chkResets.Text = "Controller resets";
+            // 
             // lblProgress
             // 
             lblProgress.AutoSize = true;
@@ -387,6 +398,7 @@ namespace HddSaver
             cfgPanel.Controls.Add(chkHead5);
             cfgPanel.Controls.Add(lblRetries);
             cfgPanel.Controls.Add(txtRetries);
+            cfgPanel.Controls.Add(chkResets);
             cfgPanel.Controls.Add(btnApplyConfig);
             cfgPanel.Dock = DockStyle.Fill;
             cfgPanel.Location = new Point(3, 83);
@@ -464,6 +476,7 @@ namespace HddSaver
         private CheckBox chkHead5;
         private Label lblRetries;
         private TextBox txtRetries;
+        private CheckBox chkResets;
         private Button btnApplyConfig;
         private Label lblProgress;
         private Label lblSectorsReceived;

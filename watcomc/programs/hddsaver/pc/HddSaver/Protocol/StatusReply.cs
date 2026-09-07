@@ -12,4 +12,5 @@ public struct StatusReply
     public uint currentLba;
     public byte headMask;
     public byte retries;
+    public byte resets;
 }

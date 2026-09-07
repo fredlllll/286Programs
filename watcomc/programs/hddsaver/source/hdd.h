@@ -24,6 +24,11 @@ extern struct ChsWithLBA hddPos;
 /* read retry policy: attempts per hdd sector (0 = give up after one) */
 extern uint8_t hddRetries;
 
+/* controller resets while retrying: set from the pc. resets are loud
+   (seek to cylinder 0 and back), so a worn drive can be read with them
+   permanently off */
+extern uint8_t resetsEnabled;
+
 /* head selection bitmask: bit N set -> head N gets dumped. lets you
    retry a single dying head without re-reading the rest */
 extern uint8_t headMask;

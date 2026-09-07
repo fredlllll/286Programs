@@ -62,6 +62,9 @@ static void printCmd(uint8_t cmd)
   case CMD_RETRIES:
     print("\r\n[cmd] RETRIES");
     break;
+  case CMD_RESETS:
+    print("\r\n[cmd] RESETS");
+    break;
   case CMD_ACK:
     print("\r\n[cmd] ACK");
     break;
@@ -252,7 +255,7 @@ bool checkCommand(uint32_t timeout)
     sendPong();
     break;
   case CMD_SEND_STATUS:
-    sendStatusReply(&hddGeom, hddPos.lba, headMask, hddRetries);
+    sendStatusReply(&hddGeom, hddPos.lba, headMask, hddRetries, resetsEnabled);
     break;
   case CMD_HEAD_MASK:
   {
@@ -273,6 +276,17 @@ bool checkCommand(uint32_t timeout)
       hddRetries = (uint8_t)tmp;
       print("\r\nReceived retries ");
       printHex(hddRetries);
+    }
+  }
+  break;
+  case CMD_RESETS:
+  {
+    int16_t tmp = uartRxTimeout(1 SECONDS);
+    if (tmp >= 0)
+    {
+      resetsEnabled = (uint8_t)(tmp ? 1 : 0);
+      print("\r\nReceived resets ");
+      printHex(resetsEnabled);
     }
   }
   break;

@@ -18,5 +18,7 @@
 
 /* ---- retry policy ---- */
 #define RETRY_HDD 16
+/* controller resets / recalibration while retrying (0 = never reset) */
+#define RESETS_HDD 0
 
 #endif

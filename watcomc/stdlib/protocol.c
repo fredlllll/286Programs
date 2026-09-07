@@ -71,7 +71,7 @@ uint32_t sendSectorPacket(uint8_t status, uint32_t lba, const uint8_t *data)
   return packetNum;
 }
 
-void sendStatusReply(const struct Geometry *geom, uint32_t currentLba, uint8_t headMask, uint8_t retries)
+void sendStatusReply(const struct Geometry *geom, uint32_t currentLba, uint8_t headMask, uint8_t retries, uint8_t resets)
 {
   struct StatusReply rep;
   rep.totalCyls = geom->cyls;
@@ -81,5 +81,6 @@ void sendStatusReply(const struct Geometry *geom, uint32_t currentLba, uint8_t h
   rep.currentLba = currentLba;
   rep.headMask = headMask;
   rep.retries = retries;
+  rep.resets = resets;
   sendMessageBody(CMD_STATUS, getNextMessageNumber(), &rep, sizeof(rep));
 }

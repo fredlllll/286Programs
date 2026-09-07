@@ -17,6 +17,7 @@ namespace HddSaver.Protocol
         SendStatus = 0x08,
         Status = 0x09,
         Sector = 0x0A,
+        Resets = 0x0B,
 
 
         Ack = 0xFE,

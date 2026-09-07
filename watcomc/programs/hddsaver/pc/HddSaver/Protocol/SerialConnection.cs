@@ -276,6 +276,18 @@ public class SerialConnection : IDisposable
         SendMessage(num, body);
     }
 
+    struct ResetsBody
+    {
+        public byte resets;
+    }
+    public void SendResets(byte resets)
+    {
+        var bdy = new ResetsBody() { resets = resets };
+        var num = GetNextMessageNum();
+        var body = AssembleMessage(num, Opcode.Resets, bdy);
+        SendMessage(num, body);
+    }
+
     public void StartReceiving()
     {
         StopReceiving();

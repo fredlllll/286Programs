@@ -34,9 +34,9 @@ namespace HddSaver
             });
             _serial.StatusReceived += s => Invoke(() =>
             {
-                AppendLog($"Status: {s.totalCyls}cyl {s.totalHeads}hd {s.totalSpt}spt LBA={s.currentLba} mask=0x{s.headMask:X2} retries={s.retries}");
+                AppendLog($"Status: {s.totalCyls}cyl {s.totalHeads}hd {s.totalSpt}spt LBA={s.currentLba} mask=0x{s.headMask:X2} retries={s.retries} resets={s.resets}");
                 lblProgress.Text = $"LBA {s.currentLba}/{s.totalSectors} ({s.totalCyls}cyl {s.totalHeads}hd {s.totalSpt}spt)";
-                lblSectorsReceived.Text = $"Mask: 0x{s.headMask:X2} Retries: {s.retries}";
+                lblSectorsReceived.Text = $"Mask: 0x{s.headMask:X2} Retries: {s.retries} Resets: {s.resets}";
                 SyncStatusToUi(s);
             });
 
@@ -86,6 +86,8 @@ namespace HddSaver
                 _serial.SendRetries(retries);
                 AppendLog("Retries sent");
             }
+            _serial.SendResets((byte)(chkResets.Checked ? 1 : 0));
+            AppendLog("Resets sent");
         }
         private void BtnBadMap_Click(object? sender, EventArgs e)
         {
@@ -155,6 +157,7 @@ namespace HddSaver
             chkHead4.Checked = (s.headMask & 0x10) != 0;
             chkHead5.Checked = (s.headMask & 0x20) != 0;
             txtRetries.Text = s.retries.ToString();
+            chkResets.Checked = s.resets != 0;
         }
 
         private void GenerateBadMap()

@@ -1,22 +1,24 @@
 /* serial protocol for hdd saver: framed packets between 286 and PC.
 
    packet layout (286 -> PC):
-     header (10 bytes): magic(2) + lba(3) + status(1) + dataCRC(2) + headerCRC(2)
-     data (512 bytes): only when status = 0x00 or 0x11
+     magic(2) + opcode(1) + packetNumber(4) + [body] (+ data after sector)
 
    commands (PC -> 286):
      0x01  START       begin/resume sending sectors
      0x02  STOP        pause after current sector
-     0x03  SEEK +3     seek to lba (3 bytes LE)
-     0x04  PING        286 replies with READY
-     0x05  STATUS      286 sends geometry + position + config
-     0x10  HEAD_MASK   set head bitmask (1 byte)
-     0x11  RETRIES     set retry count (1 byte)
-     0x12  BAUD_RATE   set baud divisor (1 byte)
+     0x03  SEEK +4     seek to lba
+     0x04  HEAD_MASK   set head bitmask (1 byte)
+     0x05  RETRIES     set retry count (1 byte)
+     0x06  PING        286 replies with PONG
+     0x07  PONG        286->PC reply to PING
+     0x08  SEND_STATUS 286 sends STATUS reply
+     0x09  STATUS      286->PC status reply opcode
+     0x0a  SECTOR      286->PC sector packet
+     0x0b  RESETS      set controller-resets flag (1 byte)
 
-   responses (PC -> 286, after each sector):
-     0x06  ACK         sector OK, send next
-     0x15  NAK         CRC error, retransmit */
+   responses (PC -> 286, after each message):
+     0xFE  ACK         packet OK
+     0xCC  NACK        CRC error, retransmit */
 #ifndef PROTOCOL_H
 #define PROTOCOL_H
 #include "intdef.h"
@@ -33,6 +35,7 @@
 #define CMD_SEND_STATUS 0x08
 #define CMD_STATUS 0x09
 #define CMD_SECTOR 0x0a
+#define CMD_RESETS 0x0b
 
 #define CMD_ACK 0xFE
 #define CMD_NACK 0xCC
@@ -51,7 +54,7 @@ struct SectorHeader
 };
 #pragma pack(pop)
 
-/* status reply packet (sent in response to CMD_STATUS) */
+/* status reply packet (sent in response to CMD_SEND_STATUS) */
 #pragma pack(push, 1)
 struct StatusReply
 {
@@ -62,6 +65,7 @@ struct StatusReply
   uint32_t currentLba;
   uint8_t headMask;
   uint8_t retries;
+  uint8_t resets;
 };
 #pragma pack(pop)
 
@@ -78,6 +82,7 @@ uint32_t sendSectorPacket(uint8_t status, uint32_t lba, const uint8_t *data);
 
 /* send status reply packet */
 void sendStatusReply(const struct Geometry *geom,
-                     uint32_t currentLba, uint8_t headMask, uint8_t retries);
+                     uint32_t currentLba, uint8_t headMask, uint8_t retries,
+                     uint8_t resets);
 
 #endif

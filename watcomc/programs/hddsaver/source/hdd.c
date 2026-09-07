@@ -10,6 +10,7 @@
 const struct Geometry hddGeom = {HDD_CYLS, HDD_HEADS, HDD_SPT, HDD_TOTAL_SECTORS};
 struct ChsWithLBA hddPos = {0, 0, 1, 0};
 uint8_t hddRetries = RETRY_HDD;
+uint8_t resetsEnabled = RESETS_HDD;
 uint8_t headMask = 0xFF;
 
 void advanceHddPosition(void)
@@ -28,9 +29,9 @@ uint8_t isStatusSuccess(uint8_t status)
 }
 
 /* reads one hdd sector. retries up to hddRetries times (configurable,
-   0 = single attempt). controller resets only happen with 2+ retries:
-   a bios disk reset recalibrates the drive (loud seek to cylinder 0
-   and back), which we avoid on a drive with weak heads.
+   0 = single attempt). controller resets happen when resetsEnabled is
+   set (from the pc): a bios disk reset recalibrates the drive (loud
+   seek to cylinder 0 and back), which a worn drive may want off.
 
    returns the final bios status so the caller can store it in the
    sector descriptor: ST_OK = clean read, ST_ECC = "ecc corrected it,
@@ -42,7 +43,6 @@ uint8_t readHddResilient(void __far *dest)
 {
   uint8_t tries;
   uint8_t status;
-  uint8_t resetsEnabled = hddRetries >= 2 ? 1 : 0;
 
   tries = 0;
   do
