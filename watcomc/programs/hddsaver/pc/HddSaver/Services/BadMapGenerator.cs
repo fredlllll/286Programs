@@ -6,12 +6,20 @@ namespace HddSaver.Services;
 
 public static class BadMapGenerator
 {
+    /* one color per read state. errors get their own shade: 0x10 (bad
+       ecc, weakest signal - data read but corrupt) is the lightest red,
+       0x04 (sector not found) medium, 0x02 (address mark not found /
+       bad sector, physical damage) darker, and anything unexpected deep
+       red. 0x11 is not here because it is data: read + ecc-corrected */
     private static readonly Dictionary<int, string> MapColors = new()
     {
         { 0, "#bdbdbd" }, // not attempted / missing
         { 1, "#2ea44f" }, // ok (0x00)
         { 2, "#a5d6a7" }, // ecc corrected (0x11), lighter green
-        { 3, "#d93025" }, // hdd read failed
+        { 3, "#ef9a9a" }, // 0x10 bad ecc, light red
+        { 4, "#ef5350" }, // 0x04 sector not found, red
+        { 5, "#c62828" }, // 0x02 amnf / bad sector, dark red
+        { 6, "#7f0000" }, // any other error, deep red
     };
 
     private static readonly Dictionary<int, string> MapNames = new()
@@ -19,7 +27,21 @@ public static class BadMapGenerator
         { 0, "missing" },
         { 1, "ok" },
         { 2, "ecc corrected" },
-        { 3, "read failed" },
+        { 3, "ecc bad (0x10)" },
+        { 4, "not found (0x04)" },
+        { 5, "amnf (0x02)" },
+        { 6, "other error" },
+    };
+
+    /* error codes from the 286 firmware mapped onto the shade scale.
+       3 = lightest, 6 = hardest. anything not enumerated is an
+       unexpected code and lands on the deepest red */
+    private static int ErrorLevel(byte status) => status switch
+    {
+        0x10 => 3, // ECC error on disk read, data bad
+        0x04 => 4, // sector not found
+        0x02 => 5, // address mark not found or bad sector
+        _ => 6,
     };
 
     public static void Generate(string outputPath, int cyls, int heads, int spt)
@@ -38,12 +60,12 @@ public static class BadMapGenerator
             if (sec.Status == SectorStatus.HeadSkip) continue; // head masked: ignored entirely
             byte lvl = sec.Status switch
             {
-                SectorStatus.Ok => 1,  // green
-                SectorStatus.Ecc => 2, // lighter green
-                _ => 3,                // red: any other bios error code
+                SectorStatus.Ok => 1,           // green
+                SectorStatus.Ecc => 2,          // lighter green
+                var s => (byte)ErrorLevel(s),   // red shades by error code
             };
             // lower value = better read; a clean read anywhere wins over an
-            // ecc-corrected one, which wins over an error
+            // ecc-corrected one, which wins over any error
             if (state[sec.Lba] == 0 || lvl < state[sec.Lba])
                 state[sec.Lba] = lvl;
         }
@@ -60,15 +82,14 @@ public static class BadMapGenerator
             lastSec = rem % spt;
         }
 
-        var cnt = new int[4];
+        var cnt = new int[7];
         foreach (var b in state) cnt[b]++;
 
-        // compact serialized map for the in-browser renderer: 1 hex nibble per
-        // lba (state 0..3), so total * heads/2 chars. geometry + this string
-        // are the entire payload the page needs to (re)draw any size.
-        var sb = new System.Text.StringBuilder(total % 2 == 0 ? total / 2 : total / 2 + 1);
-        for (int i = 0; i + 1 < total; i += 2) sb.Append("0123456789abcdef"[state[i] * 4 + state[i + 1]]);
-        if (total % 2 == 1) sb.Append("0123456789abcdef"[state[total - 1] * 4]);
+        // compact serialized map for the in-browser renderer: 1 hex nibble
+        // per lba (state 0..6). geometry + this string are the entire
+        // payload the page needs to (re)draw any size.
+        var sb = new System.Text.StringBuilder(total);
+        for (int i = 0; i < total; i++) sb.Append("0123456789abcdef"[state[i]]);
         string stateHex = sb.ToString();
         int lastLb = (int)lastLba;
 
@@ -96,7 +117,7 @@ public static class BadMapGenerator
             "  <div class=\"legend\">",
         };
 
-        foreach (var st in new[] { 1, 2, 3, 0 })
+        foreach (var st in new[] { 1, 2, 3, 4, 5, 6, 0 })
         {
             o.Add($"    <span><i style=\"background:{MapColors[st]}\"></i>{MapNames[st]}</span>");
         }
@@ -104,7 +125,7 @@ public static class BadMapGenerator
         o.Add($"  <div class=\"toolbar\"><label for=\"cz\" >Cell size:</label>" +
               "<input id=\"cz\" type=\"range\" min=\"2\" max=\"14\" step=\"1\" value=\"3\">" +
               "<output id=\"czv\"></output></div>");
-        o.Add($"  <div class=\"counts\">{cnt[1]} ok | {cnt[2]} ecc corrected | {cnt[3]} read failed | {cnt[0]} missing" +
+        o.Add($"  <div class=\"counts\">{cnt[1]} ok | {cnt[2]} ecc corrected | {cnt[3]} ecc bad | {cnt[4]} not found | {cnt[5]} amnf | {cnt[6]} other err | {cnt[0]} missing" +
               (lastLba >= 0 ? $" <b>| ends at lba {lastLba} (head {lastHead} sec {lastSec} cyl {lastCyl})</b>" : "") + "</div>");
         o.Add("  <div class=\"readout\" id=\"readout\">LBA -</div>");
         o.Add("</header>");
@@ -114,12 +135,12 @@ public static class BadMapGenerator
 var CYL=@@CYL@@,HEADS=@@HEADS@@,SPT=@@SPT@@,ML=@@ML@@,MT=@@MT@@,GAP=@@GAP@@,TICKH=@@TICKH@@;
 var STATE='@@STATE@@';
 var LAST=@@LAST@@;
-var COLORS=['@@C0@@','@@C1@@','@@C2@@','@@C3@@'];
+var COLORS=['@@C0@@','@@C1@@','@@C2@@','@@C3@@','@@C4@@','@@C5@@','@@C6@@'];
 var wrap=document.querySelector('.wrap');
 var rt=document.getElementById('readout');
 var cz=document.getElementById('cz'),czv=document.getElementById('czv');
 var svg,hv;
-function st(l){var v=parseInt(STATE[Math.floor(l/2)],16);return(v>>(l%2?0:2))&3;}
+function st(l){return parseInt(STATE[l],16);}
 function render(){
   var cell=+cz.value;
   czv.textContent=cell+' px';
@@ -186,7 +207,10 @@ wrap.addEventListener('mouseleave',function(){rt.textContent='LBA -';if(hv)hv.se
             Replace("@@C0@@", MapColors[0]).
             Replace("@@C1@@", MapColors[1]).
             Replace("@@C2@@", MapColors[2]).
-            Replace("@@C3@@", MapColors[3]);
+            Replace("@@C3@@", MapColors[3]).
+            Replace("@@C4@@", MapColors[4]).
+            Replace("@@C5@@", MapColors[5]).
+            Replace("@@C6@@", MapColors[6]);
         o.Add(scriptTpl);
         o.Add("</body></html>");
 
