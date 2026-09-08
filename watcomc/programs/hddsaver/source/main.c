@@ -4,7 +4,6 @@
 // this file is the entry point: initializes uart and crc, then hands
 // off to program.c for the main loop.
 
-#include "definitions.h"
 #include "math.h"
 #include "print.h"
 #include "keyboard.h"

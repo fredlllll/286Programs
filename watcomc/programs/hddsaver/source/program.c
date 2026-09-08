@@ -9,7 +9,6 @@
    the entire dump is controlled from the pc side via serial commands.
    no keyboard interaction needed after startup. */
 
-#include "definitions.h"
 #include "math.h"
 #include "print.h"
 #include "keyboard.h"

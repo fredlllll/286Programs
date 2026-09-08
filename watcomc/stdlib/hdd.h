@@ -1,10 +1,23 @@
 /* hdd side: runtime geometry, position tracking, resilient sector
-   reading and the bad sector logs */
+   reading and the bad sector logs.
+
+   the default geometry and retry policy live here because they are
+   drive properties, not an application concern. any program that wants
+   different values may overwrite the variables after including this
+   header; hddGeom is initialized from these defines at build time. */
 #ifndef HDD_H
 #define HDD_H
 
-#include "definitions.h"
+#include "intdef.h"
 #include "int13.h"
+
+/* ---- default hard disk geometry ----
+   chs = cylinder/head/sector, classic pc addressing. lba = logical
+   block addressing, sequential sector numbering */
+#define HDD_CYLS 820
+#define HDD_HEADS 6
+#define HDD_SPT 26
+#define HDD_TOTAL_SECTORS ((uint32_t)HDD_CYLS*(uint32_t)HDD_HEADS*(uint32_t)HDD_SPT)
 
 /* ---- bios read status codes ----
    returned by readHddResilient (see isStatusSuccess below). 0 = clean
@@ -13,8 +26,7 @@
 #define ST_ECC 0x11
 
 /* ---- runtime geometry ----
-   initialized from definitions.h; the startup prompts in main()
-   may override it. see definitions.h for what chs means */
+   the startup code may override the values before first use */
 extern const struct Geometry hddGeom;
 /* current read position on the hdd. main() saves/restores it around
    each disk so an aborted disk can be retried at the same spot.
@@ -23,11 +35,13 @@ extern struct ChsWithLBA hddPos;
 
 /* read retry policy: attempts per hdd sector (0 = give up after one) */
 extern uint8_t hddRetries;
+#define RETRY_HDD 16
 
 /* controller resets while retrying: set from the pc. resets are loud
    (seek to cylinder 0 and back), so a worn drive can be read with them
    permanently off */
 extern uint8_t resetsEnabled;
+#define RESETS_HDD 0
 
 /* head selection bitmask: bit N set -> head N gets dumped. lets you
    retry a single dying head without re-reading the rest */

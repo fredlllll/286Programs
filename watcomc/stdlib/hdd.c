@@ -2,9 +2,9 @@
 #include "int13.h"
 #include "print.h"
 
-/* runtime geometry, initialized from the defines in definitions.h; the
-   startup prompts allow overriding because the bios may translate
-   differently (e.g. after the cmos battery died) and reads only line
+/* runtime geometry, initialized from the defines in hdd.h; an
+   application may override the default values if the bios reports
+   different chs (e.g. after the cmos battery died) and reads only line
    up when we use exactly the geometry the data was originally written
    with */
 const struct Geometry hddGeom = {HDD_CYLS, HDD_HEADS, HDD_SPT, HDD_TOTAL_SECTORS};
