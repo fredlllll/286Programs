@@ -123,11 +123,9 @@ static void sendOneSector(void)
      fall straight into sending the next enabled sector. with a single
      head enabled that used to mean a lengthy poll per lba of the masked
      heads, and a whole extra loop() round for every masked span. */
-  while (hddPos.lba < hddGeom.totalSectors && (headMask & (1 << hddPos.head)) == 0)
+  skipMaskedHeads();
+  if (hddPos.lba >= hddGeom.totalSectors)
   {
-    advanceHddPosition();
-  }
-  if(hddPos.lba >= hddGeom.totalSectors){
     return;
   }
 
@@ -245,10 +243,29 @@ bool checkCommand(uint32_t timeout)
   switch (opcode)
   {
   case CMD_START:
+  {
+    /* a seek may have landed inside a masked head. hddPos fast-forwards
+       silently there (masked sectors are never transmitted), so print
+       the lba the stream will REALLY begin at - not the pre-skip one -
+       otherwise a "seek to 1000, started at 1001" looks like an
+       off-by-one when it is the mask skipping past 1000 */
+    uint32_t skipped = skipMaskedHeads();
     state = STATE_RUN;
-    print("\r\nStarted at lba ");
-    printDecLong(hddPos.lba);
-    break;
+    if (skipped > 0)
+    {
+      print("\r\nstarted at lba ");
+      printDecLong(hddPos.lba);
+      print(" (skipped ");
+      printDecLong(skipped);
+      print(" masked sectors)");
+    }
+    else
+    {
+      print("\r\nStarted at lba ");
+      printDecLong(hddPos.lba);
+    }
+  }
+  break;
   case CMD_STOP:
     state = STATE_PAUSE;
     print("\r\nPaused at lba ");
@@ -301,6 +318,12 @@ bool checkCommand(uint32_t timeout)
       seekHdd(lba);
       print("\r\nReceived seek to ");
       printDecLong(lba);
+      if ((headMask & (1 << hddPos.head)) == 0)
+      {
+        print(" (head ");
+        printDecLong(hddPos.head);
+        print(" is masked, start will skip it)");
+      }
     }
   }
   break;

@@ -23,6 +23,18 @@ void seekHdd(uint32_t target)
   hddPos = LbaToChsWithLba(target, &hddGeom);
 }
 
+uint32_t skipMaskedHeads(void)
+{
+  uint32_t skipped;
+  skipped = 0;
+  while (hddPos.lba < hddGeom.totalSectors && (headMask & (1 << hddPos.head)) == 0)
+  {
+    stepChs(&hddPos, &hddGeom);
+    skipped++;
+  }
+  return skipped;
+}
+
 uint8_t isStatusSuccess(uint8_t status)
 {
   return status == ST_OK || status == ST_ECC;

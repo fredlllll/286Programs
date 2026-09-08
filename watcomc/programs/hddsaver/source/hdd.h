@@ -42,6 +42,13 @@ void advanceHddPosition(void);
    full-travel seek costs only fractions of a second */
 void seekHdd(uint32_t lba);
 
+/* fast-forwards hddPos over any sectors whose head is masked. masked
+   sectors are neither touched nor transmitted, so they must not be
+   "started at". returns how many sectors were skipped, so callers can
+   tell the operator if a seek landed inside a masked head and the dump
+   will really begin a few sectors later instead of at the target */
+uint32_t skipMaskedHeads(void);
+
 uint8_t isStatusSuccess(uint8_t status);
 
 /* reads one hdd sector into dest with retries. returns the bios

@@ -64,6 +64,22 @@ namespace HddSaver
             {
                 _serial.SendSeek(lba);
                 AppendLog($"Seek to LBA {lba}");
+                WarnIfHeadMasked(lba);
+            }
+        }
+
+        /* geometry as reported by the firmware: 26 sectors per track,
+           6 heads. if the sector the user seeks to sits on a masked head
+           it will never be transmitted and the stream starts after it -
+           warn up front so that isn't mistaken for an off-by-one */
+        private void WarnIfHeadMasked(uint lba)
+        {
+            const int spt = 26, heads = 6;
+            var head = (int)((lba / spt) % heads);
+            var mask = GetHeadMask();
+            if ((mask & (1 << head)) == 0)
+            {
+                AppendLog($"warn: LBA {lba} is on head {head}, which is masked - start will skip it");
             }
         }
         private async void BtnPing_Click(object? sender, EventArgs e)
