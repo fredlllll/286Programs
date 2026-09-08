@@ -92,6 +92,11 @@ namespace HddSaver
             _serial.SendPark();
             AppendLog("Park sent");
         }
+        private async void BtnReadOne_Click(object? sender, EventArgs e)
+        {
+            _serial.SendReadOne();
+            AppendLog("Read-one sent");
+        }
         private async void BtnStatus_Click(object? sender, EventArgs e)
         {
             _serial.QueryStatus();
@@ -154,6 +159,7 @@ namespace HddSaver
             btnSeek.Enabled = enabled;
             btnPing.Enabled = enabled;
             btnPark.Enabled = enabled;
+            btnReadOne.Enabled = enabled;
             btnStatus.Enabled = enabled;
             btnApplyConfig.Enabled = enabled;
         }

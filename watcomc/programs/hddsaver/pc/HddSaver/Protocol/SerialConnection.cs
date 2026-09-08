@@ -295,6 +295,16 @@ public class SerialConnection : IDisposable
         SendMessage(num, body);
     }
 
+    /* ask the 286 to read and send exactly the sector at its current
+       position (after a seek), then return to idle. the 286 stays put,
+       so repeated presses re-read the same lba. */
+    public void SendReadOne()
+    {
+        var num = GetNextMessageNum();
+        var body = AssembleMessage(num, Opcode.ReadOne);
+        SendMessage(num, body);
+    }
+
     public void StartReceiving()
     {
         StopReceiving();

@@ -19,6 +19,7 @@ namespace HddSaver.Protocol
         Sector = 0x0A,
         Resets = 0x0B,
         Park = 0x0C,
+        ReadOne = 0x0D,
 
 
         Ack = 0xFE,

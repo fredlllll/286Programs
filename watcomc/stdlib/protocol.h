@@ -16,6 +16,9 @@
      0x0a  SECTOR      286->PC sector packet
       0x0b  RESETS      set controller-resets flag (1 byte)
       0x0c  PARK        park heads (seek to cyl 0)
+      0x0d  READ_ONE    read and send exactly the sector at the current
+                        position; stays paused, position unchanged (the
+                        pc's way to re-read a specific failed sector)
 
    responses (PC -> 286, after each message):
      0xFE  ACK         packet OK
@@ -38,6 +41,7 @@
 #define CMD_SECTOR 0x0a
 #define CMD_RESETS 0x0b
 #define CMD_PARK 0x0c
+#define CMD_READ_ONE 0x0d
 
 #define CMD_ACK 0xFE
 #define CMD_NACK 0xCC

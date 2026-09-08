@@ -68,6 +68,9 @@ static void printCmd(uint8_t cmd)
   case CMD_PARK:
     print("\r\n[cmd] PARK");
     break;
+  case CMD_READ_ONE:
+    print("\r\n[cmd] READ_ONE");
+    break;
   case CMD_ACK:
     print("\r\n[cmd] ACK");
     break;
@@ -106,31 +109,18 @@ static bool waitForAck(uint32_t packetNum, uint32_t timeoutTicks)
   return FALSE;
 }
 
-/* send one sector: header always, data only if read was successful.
-   waits for the ack, resending the same packet (same number) on nak or
-   timeout instead of blocking forever. */
-static void sendOneSector(void)
+/* read the sector at hddPos and transmit it (header + data if good),
+   waiting for the pc's ack with the usual retries. does NOT change
+   hddPos. shared by the streaming loop and the pc-driven single read,
+   so a manually re-read sector takes exactly the same wire path. */
+static uint8_t readAndSendCurrentSector(void)
 {
   uint8_t status;
   uint32_t packetNum;
   uint8_t attempt;
 
-  /* head masked out: skip the sector without touching the drive or the
-     wire. an untransmitted sector is indistinguishable from a missing one
-     downstream (zero-filled in the assembled image), so a skip descriptor
-     would only waste serial bandwidth. blaze across the whole run of
-     masked sectors in one pass instead of one lba per loop() round, then
-     fall straight into sending the next enabled sector. with a single
-     head enabled that used to mean a lengthy poll per lba of the masked
-     heads, and a whole extra loop() round for every masked span. */
-  skipMaskedHeads();
-  if (hddPos.lba >= hddGeom.totalSectors)
-  {
-    return;
-  }
-
-  /* read the hdd sector */
-  uartSetRts(FALSE); // signal we cant receive during hdd read
+  /* signal we cant receive during hdd read */
+  uartSetRts(FALSE);
   status = readHddResilient(sectorBuf);
   uartSetRts(TRUE);
 
@@ -159,6 +149,29 @@ static void sendOneSector(void)
     print("\r\ngive up, no ack for lba ");
     printDecLong(hddPos.lba);
   }
+  return status;
+}
+
+/* send one sector: header always, data only if read was successful. */
+static void sendOneSector(void)
+{
+  uint8_t status;
+
+  /* head masked out: skip the sector without touching the drive or the
+     wire. an untransmitted sector is indistinguishable from a missing one
+     downstream (zero-filled in the assembled image), so a skip descriptor
+     would only waste serial bandwidth. blaze across the whole run of
+     masked sectors in one pass instead of one lba per loop() round, then
+     fall straight into sending the next enabled sector. with a single
+     head enabled that used to mean a lengthy poll per lba of the masked
+     heads, and a whole extra loop() round for every masked span. */
+  skipMaskedHeads();
+  if (hddPos.lba >= hddGeom.totalSectors)
+  {
+    return;
+  }
+
+  status = readAndSendCurrentSector();
 
   advanceHddPosition();
 }
@@ -344,6 +357,31 @@ bool checkCommand(uint32_t timeout)
         print("\r\nSeeking to cyl 0");
         seekHdd(0);
       }
+    }
+  }
+  break;
+  case CMD_READ_ONE:
+  {
+    /* read exactly the sector at the current position and stay put.
+       deliberately ignores the head mask: this is how the pc re-reads
+       a specific failed sector on a masked head. */
+    uint8_t status;
+    print("\r\nsingle read at lba ");
+    printDecLong(hddPos.lba);
+    if (hddPos.lba >= hddGeom.totalSectors)
+    {
+      print(" (end of disk, nothing to read)");
+      break;
+    }
+    status = readAndSendCurrentSector();
+    if (isStatusSuccess(status))
+    {
+      print(" ok");
+    }
+    else
+    {
+      print(" status 0x");
+      printHex(status);
     }
   }
   break;
