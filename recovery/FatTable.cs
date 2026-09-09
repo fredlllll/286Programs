@@ -31,15 +31,18 @@ class FatTable
         if (fat12)
         {
             /* 12-bit entries are packed 2 per 3 bytes, byte-aligned only
-               for even indices: entry n lives at byte n + n/2. */
+               for even indices: entry n lives at byte n + n/2. the byte
+               offsets are relative to the fat start; compare them against
+               fatBytes, not the absolute image offset. */
             for (int n = 2; n < maxClusters; n += 2)
             {
-                int off = fatOffset + n + n / 2;
-                if (off + 2 >= fatBytes)
+                int rel = n + n / 2;
+                if (rel + 2 >= fatBytes)
                 {
                     break;
                 }
 
+                int off = fatOffset + rel;
                 int b0 = img[off], b1 = img[off + 1], b2 = img[off + 2];
                 entries[n] = b0 | ((b1 & 0x0F) << 8);
                 if (n + 1 < maxClusters)
@@ -50,7 +53,7 @@ class FatTable
         }
         else
         {
-            for (int n = 2; n < maxClusters && n * 2 + 1 < fatBytes; n++)
+            for (int n = 2; n < maxClusters && n * 2 + 2 <= fatBytes; n++)
             {
                 entries[n] = img.ReadU16(fatOffset + n * 2);
             }

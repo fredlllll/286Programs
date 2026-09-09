@@ -19,21 +19,44 @@ class Program
         mbr.Report();
         Console.WriteLine();
 
-        var boot = BootSector.Parse(hdd);
-        boot.Report();
-        Console.WriteLine();
+        var part = mbr.PickFatPartition();
+        if (part == null)
+        {
+            Console.WriteLine("No usable FAT partition in the MBR - carving raw data only.");
+        }
+        else
+        {
+            Console.WriteLine($"Using partition at LBA {part.Value.firstSectorLba} ({part.Value.type})");
+            Console.WriteLine();
 
-        var fat = FatTable.Read(hdd, boot);
-        fat.Report();
-        Console.WriteLine();
+            try
+            {
+                var boot = BootSector.Parse(hdd, part.Value.firstSectorLba);
+                boot.Report();
+                Console.WriteLine();
 
-        var root = DirectoryReader.Read(hdd, boot, fat);
-        root.Report();
+                var fat = FatTable.Read(hdd, boot);
+                fat.Report();
+                Console.WriteLine();
+
+                var root = DirectoryReader.Read(hdd, boot, fat);
+                root.Report();
+                Console.WriteLine();
+
+                if (args.Length > 1)
+                {
+                    FileRecoverer.Dump(hdd, boot, fat, root, args[1]);
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Filesystem parse failed: {ex.Message}");
+            }
+        }
         Console.WriteLine();
 
         if (args.Length > 1)
         {
-            FileRecoverer.Dump(hdd, boot, fat, root, args[1]);
             TextCarver.Carve(hdd, args[1]);
         }
     }
