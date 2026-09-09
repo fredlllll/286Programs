@@ -5,8 +5,8 @@ namespace Recovery;
 /* when the filesystem is damaged or simply not there, the raw sectors
    still hold readable text. a sector belongs to a single file, so a
    sector that sits in a text file is entirely text - no need to pick
-   passages out of binaries. each sector is classified on its own and
-   contiguous text sectors are dumped whole. */
+   passages out of binaries. text sectors are dumped one by one; adjacent
+   text sectors need not belong to the same file, so nothing is merged. */
 static class TextCarver
 {
     private const double MinRatio = 0.80;
@@ -31,81 +31,45 @@ static class TextCarver
 
     public static void Carve(HddImage img, string? outDir)
     {
-        var runs = ScanTextRuns(img);
+        var sectors = ScanTextSectors(img);
         Console.WriteLine("--- Carving ---");
-        Console.WriteLine($"  Found {runs.Count} text sector runs (ratio >= {MinRatio * 100:0}%)");
-        Console.WriteLine($"  LBA          CHS          sectors ratio lines  sample");
+        Console.WriteLine($"  Found {sectors.Count} text sectors (ratio >= {MinRatio * 100:0}%)");
+        Console.WriteLine($"  LBA          CHS          ratio lines  sample");
 
-        foreach (var run in runs)
+        foreach (var s in sectors)
         {
-            var (cyl, head, sec) = Geometry.LbaToChs(run.StartSector);
-            var s = run.Sample;
-            if (s.Length > 44)
-            {
-                s = s[..44];
-            }
-
-            string range = run.SectorCount == 1
-                ? $"{run.StartSector}"
-                : $"{run.StartSector}-{run.StartSector + run.SectorCount - 1}";
-            Console.WriteLine($"  LBA {range,-8} {cyl}/{head}/{sec,-9} {run.SectorCount,4}  {run.MinRatio,4}% {run.Lines,5}  {s}");
+            var (cyl, head, sec) = Geometry.LbaToChs(s.StartSector);
+            Console.WriteLine($"  LBA {s.StartSector,-9} {cyl}/{head}/{sec,-9} {s.MinRatio,4}% {s.Lines,5}  {s.Sample}");
         }
 
-        DumpRuns(runs, img, outDir);
+        DumpSectors(sectors, img, outDir);
         Signatures(img);
     }
 
-    /* classifies sectors, grouping contiguous text sectors into runs. the
-       integer ratio is over the used part of the sector (up to the last
-       non-zero byte), so the partially-filled final sector of a text file
-       still counts while an all-empty sector does not. */
-    private static List<TextRun> ScanTextRuns(HddImage img)
+    /* collects the text sectors; the ratio is over the used part of the
+       sector (up to the last non-zero byte), so the partially-filled final
+       sector of a text file still counts while an all-empty sector does
+       not. */
+    private static List<TextSector> ScanTextSectors(HddImage img)
     {
-        var runs = new List<TextRun>();
-        int runStart = -1;
-        int minRatio = 0, lines = 0;
-
-        void Flush(int endSector)
-        {
-            if (runStart >= 0)
-            {
-                runs.Add(new TextRun(runStart, endSector - runStart, lines, minRatio));
-            }
-            runStart = -1;
-        }
-
+        var sectors = new List<TextSector>();
         for (int s = 0; s < img.SectorCount; s++)
         {
-            if (SectorIsText(img, s, out int ratio, out int secLines))
+            if (SectorIsText(img, s, out int ratio, out int lines))
             {
-                if (runStart < 0)
+                var run = new TextSector(s, ratio, lines);
+                int sampleLen = Math.Min(48, Geometry.BytesPerSector);
+                var sample = new byte[sampleLen];
+                int off = s * Geometry.BytesPerSector;
+                for (int i = 0; i < sampleLen; i++)
                 {
-                    runStart = s;
-                    minRatio = ratio;
-                    lines = 0;
+                    sample[i] = img[off + i] < 0x20 ? (byte)0x20 : img[off + i];
                 }
-                minRatio = Math.Min(minRatio, ratio);
-                lines += secLines;
-            }
-            else
-            {
-                Flush(s);
+                run.Sample = Cp850.GetString(sample);
+                sectors.Add(run);
             }
         }
-        Flush(img.SectorCount);
-
-        foreach (var run in runs)
-        {
-            int sampleLen = Math.Min(48, run.SectorCount * Geometry.BytesPerSector);
-            var sample = new byte[sampleLen];
-            int off = run.StartSector * Geometry.BytesPerSector;
-            for (int i = 0; i < sampleLen; i++)
-            {
-                sample[i] = img[off + i] < 0x20 ? (byte)0x20 : img[off + i];
-            }
-            run.Sample = Cp850.GetString(sample);
-        }
-        return runs;
+        return sectors;
     }
 
     private static bool SectorIsText(HddImage img, int sector, out int ratio, out int lines)
@@ -134,7 +98,7 @@ static class TextCarver
         return ratio >= MinRatio * 100;
     }
 
-    private static void DumpRuns(List<TextRun> runs, HddImage img, string? outDir)
+    private static void DumpSectors(List<TextSector> sectors, HddImage img, string? outDir)
     {
         if (outDir == null)
         {
@@ -143,10 +107,10 @@ static class TextCarver
 
         var carvedDir = Path.Combine(outDir, "carved");
         Directory.CreateDirectory(carvedDir);
-        foreach (var run in runs)
+        foreach (var sector in sectors)
         {
-            string file = Path.Combine(carvedDir, $"{run.StartSector:000000}_{run.SectorCount:00000}.txt");
-            string text = Cp850.GetString(img.Slice(run.StartSector * Geometry.BytesPerSector, run.SectorCount * Geometry.BytesPerSector));
+            string file = Path.Combine(carvedDir, $"{sector.StartSector:000000}.txt");
+            string text = Cp850.GetString(img.Slice(sector.StartSector * Geometry.BytesPerSector, Geometry.BytesPerSector));
             File.WriteAllText(file, text, new UTF8Encoding(false));
         }
     }
@@ -172,20 +136,18 @@ static class TextCarver
         }
     }
 
-    class TextRun
+    class TextSector
     {
         public int StartSector;
-        public int SectorCount;
-        public int Lines;
         public int MinRatio;
+        public int Lines;
         public string Sample = "";
 
-        public TextRun(int startSector, int sectorCount, int lines, int minRatio)
+        public TextSector(int startSector, int minRatio, int lines)
         {
             StartSector = startSector;
-            SectorCount = sectorCount;
-            Lines = lines;
             MinRatio = minRatio;
+            Lines = lines;
         }
     }
 }
