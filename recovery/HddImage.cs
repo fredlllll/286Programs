@@ -1,14 +1,18 @@
 ﻿namespace Recovery;
 
 /* a flat image of the hdd, just bytes plus a convenient typed accessor */
-class HddImage
+public class HddImage
 {
     private readonly byte[] _data;
+    private readonly MemoryStream ms;
 
     public HddImage(string path)
     {
         _data = File.ReadAllBytes(path);
+        ms = new MemoryStream(_data);
     }
+
+    public MemoryStream Stream { get { return ms; } }
 
     public int Length => _data.Length;
     public int SectorCount => _data.Length / Geometry.BytesPerSector;

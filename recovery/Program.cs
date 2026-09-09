@@ -1,3 +1,5 @@
+using recovery;
+
 namespace Recovery;
 
 class Program
@@ -11,6 +13,11 @@ class Program
         }
 
         var hdd = new HddImage(args[0]);
+
+        var mbr = new Mbr(hdd);
+        mbr.Parse();
+        mbr.Report();
+        Console.WriteLine();
 
         var boot = BootSector.Parse(hdd);
         boot.Report();

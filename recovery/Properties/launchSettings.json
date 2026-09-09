@@ -1,0 +1,8 @@
+{
+  "profiles": {
+    "recovery": {
+      "commandName": "Project",
+      "commandLineArgs": "\"C:\\Users\\Freddy\\Desktop\\hdd.bin\" \"E:\\TMP\\Tandon Computer\\recoveryout\""
+    }
+  }
+}
