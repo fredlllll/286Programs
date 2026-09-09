@@ -11,6 +11,16 @@ static class TextCarver
     private const int MinRun = 32;
     private const double MinScore = 0.80;
 
+    /* the dump stores western-european text in oem codepage 850; the .txt
+       files are written as utf-8 so they read correctly on a modern pc. */
+    private static readonly Encoding Cp850;
+
+    static TextCarver()
+    {
+        Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
+        Cp850 = Encoding.GetEncoding(850);
+    }
+
     /* a text byte is what you expect while reading a plain or wordstar
        file: printable ascii plus tab/cr/lf. 0x80..0xff is tolerated
        inside a run (wordstar markup sits in the high bit) but does not
@@ -56,10 +66,10 @@ static class TextCarver
             if (total >= MinRun && (double)good / total >= MinScore)
             {
                 int sampleLen = Math.Min(100, total);
-                var sample = new char[sampleLen];
+                var sample = new byte[sampleLen];
                 for (int i = 0; i < sampleLen; i++)
                 {
-                    sample[i] = img[start + i] < 0x20 ? (char)0x20 : (char)img[start + i];
+                    sample[i] = img[start + i] < 0x20 ? (byte)0x20 : img[start + i];
                 }
 
                 runs.Add(new TextRun(start, total)
@@ -67,7 +77,7 @@ static class TextCarver
                     Score = good * 100 / total,
                     Lines = lines,
                     HighBitRatio = (double)hi / total,
-                    Sample = new string(sample),
+                    Sample = Cp850.GetString(sample),
                 });
             }
             start = -1;
@@ -122,7 +132,8 @@ static class TextCarver
             long lba = run.Offset / Geometry.BytesPerSector;
             string file = Path.Combine(carvedDir,
                 $"{lba:000000}_{run.Offset % Geometry.BytesPerSector:000}_{run.Length:00000}.txt");
-            File.WriteAllBytes(file, img.Slice(run.Offset, run.Length));
+            string text = Cp850.GetString(img.Slice(run.Offset, run.Length));
+            File.WriteAllText(file, text, new UTF8Encoding(false));
         }
     }
 
