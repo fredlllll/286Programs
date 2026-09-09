@@ -3,13 +3,13 @@ using System.Text;
 namespace Recovery;
 
 /* when the filesystem is damaged or simply not there, the raw sectors
-   still hold readable text. this scans the full image for runs of
-   printable material and reports each one with its LBA and CHS so it can
-   be checked against the badmap. */
+   still hold readable text. a sector belongs to a single file, so a
+   sector that sits in a text file is entirely text - no need to pick
+   passages out of binaries. each sector is classified on its own and
+   contiguous text sectors are dumped whole. */
 static class TextCarver
 {
-    private const int MinRun = 32;
-    private const double MinScore = 0.80;
+    private const double MinRatio = 0.80;
 
     /* the dump stores western-european text in oem codepage 850; the .txt
        files are written as utf-8 so they read correctly on a modern pc. */
@@ -22,9 +22,10 @@ static class TextCarver
     }
 
     /* a text byte is what you expect while reading a plain or wordstar
-       file: printable ascii plus tab/cr/lf. 0x80..0xff is tolerated
-       inside a run (wordstar markup sits in the high bit) but does not
-       count toward the score. any other byte is a hard break. */
+       file: printable ascii plus tab/cr/lf. oem-850 accented characters
+       live in 0x80..0xff; they are cp850 text but deliberately not counted
+       here - the media-descriptor entries in a fat sector are high bytes
+       too, and must not push a binary sector over the threshold. */
     private static bool IsTextByte(byte b) =>
         b >= 0x20 && b <= 0x7E || b == 0x09 || b == 0x0A || b == 0x0D;
 
@@ -32,93 +33,108 @@ static class TextCarver
     {
         var runs = ScanTextRuns(img);
         Console.WriteLine("--- Carving ---");
-        Console.WriteLine($"  Found {runs.Count} text runs (len>={MinRun}, score>={MinScore * 100:0}%)");
+        Console.WriteLine($"  Found {runs.Count} text sector runs (ratio >= {MinRatio * 100:0}%)");
+        Console.WriteLine($"  LBA          CHS          sectors ratio lines  sample");
 
         foreach (var run in runs)
         {
-            long lba = run.Offset / Geometry.BytesPerSector;
-            var (cyl, head, sec) = Geometry.LbaToChs(lba);
+            var (cyl, head, sec) = Geometry.LbaToChs(run.StartSector);
             var s = run.Sample;
             if (s.Length > 44)
             {
                 s = s[..44];
             }
-            Console.WriteLine($"  LBA {lba,-7} {cyl}/{head}/{sec,-11} len {run.Length,6} score {run.Score,3}% lines {run.Lines,3} highbit {run.HighBitRatio * 100,3:0}%  {s}");
+
+            string range = run.SectorCount == 1
+                ? $"{run.StartSector}"
+                : $"{run.StartSector}-{run.StartSector + run.SectorCount - 1}";
+            Console.WriteLine($"  LBA {range,-8} {cyl}/{head}/{sec,-9} {run.SectorCount,4}  {run.MinRatio,4}% {run.Lines,5}  {s}");
         }
 
-        DumpEscapedRuns(runs, img, outDir);
+        DumpRuns(runs, img, outDir);
         Signatures(img);
     }
 
+    /* classifies sectors, grouping contiguous text sectors into runs. the
+       integer ratio is over the used part of the sector (up to the last
+       non-zero byte), so the partially-filled final sector of a text file
+       still counts while an all-empty sector does not. */
     private static List<TextRun> ScanTextRuns(HddImage img)
     {
         var runs = new List<TextRun>();
-        int start = -1;
-        int total = 0, good = 0, hi = 0, lines = 0;
+        int runStart = -1;
+        int minRatio = 0, lines = 0;
 
-        void Flush()
+        void Flush(int endSector)
         {
-            if (start < 0)
+            if (runStart >= 0)
             {
-                return;
+                runs.Add(new TextRun(runStart, endSector - runStart, lines, minRatio));
             }
-
-            if (total >= MinRun && (double)good / total >= MinScore)
-            {
-                int sampleLen = Math.Min(100, total);
-                var sample = new byte[sampleLen];
-                for (int i = 0; i < sampleLen; i++)
-                {
-                    sample[i] = img[start + i] < 0x20 ? (byte)0x20 : img[start + i];
-                }
-
-                runs.Add(new TextRun(start, total)
-                {
-                    Score = good * 100 / total,
-                    Lines = lines,
-                    HighBitRatio = (double)hi / total,
-                    Sample = Cp850.GetString(sample),
-                });
-            }
-            start = -1;
+            runStart = -1;
         }
 
-        for (int i = 0; i < img.Length; i++)
+        for (int s = 0; s < img.SectorCount; s++)
         {
-            byte b = img[i];
+            if (SectorIsText(img, s, out int ratio, out int secLines))
+            {
+                if (runStart < 0)
+                {
+                    runStart = s;
+                    minRatio = ratio;
+                    lines = 0;
+                }
+                minRatio = Math.Min(minRatio, ratio);
+                lines += secLines;
+            }
+            else
+            {
+                Flush(s);
+            }
+        }
+        Flush(img.SectorCount);
+
+        foreach (var run in runs)
+        {
+            int sampleLen = Math.Min(48, run.SectorCount * Geometry.BytesPerSector);
+            var sample = new byte[sampleLen];
+            int off = run.StartSector * Geometry.BytesPerSector;
+            for (int i = 0; i < sampleLen; i++)
+            {
+                sample[i] = img[off + i] < 0x20 ? (byte)0x20 : img[off + i];
+            }
+            run.Sample = Cp850.GetString(sample);
+        }
+        return runs;
+    }
+
+    private static bool SectorIsText(HddImage img, int sector, out int ratio, out int lines)
+    {
+        int off = sector * Geometry.BytesPerSector;
+        int text = 0, lastNonZero = -1;
+        lines = 0;
+        for (int i = 0; i < Geometry.BytesPerSector; i++)
+        {
+            byte b = img[off + i];
+            if (b != 0)
+            {
+                lastNonZero = i;
+            }
             if (IsTextByte(b))
             {
-                if (start < 0)
-                {
-                    start = i;
-                    total = good = hi = lines = 0;
-                }
-
-                total++;
-                good++;
+                text++;
                 if (b == '\n' || b == '\r')
                 {
                     lines++;
                 }
             }
-            else if (b >= 0x80)
-            {
-                if (start >= 0)
-                {
-                    total++;
-                    hi++;
-                }
-            }
-            else
-            {
-                Flush();
-            }
         }
-        Flush();
-        return runs;
+
+        ratio = lastNonZero >= 0 ? text * 100 / (lastNonZero + 1) : 0;
+        return ratio >= MinRatio * 100;
     }
 
-    private static void DumpEscapedRuns(List<TextRun> runs, HddImage img, string? outDir)
+    private static void DumpRuns(List<TextRun> runs, HddImage img, string? outDir)
     {
         if (outDir == null)
         {
@@ -129,10 +145,8 @@ static class TextCarver
         Directory.CreateDirectory(carvedDir);
         foreach (var run in runs)
         {
-            long lba = run.Offset / Geometry.BytesPerSector;
-            string file = Path.Combine(carvedDir,
-                $"{lba:000000}_{run.Offset % Geometry.BytesPerSector:000}_{run.Length:00000}.txt");
-            string text = Cp850.GetString(img.Slice(run.Offset, run.Length));
+            string file = Path.Combine(carvedDir, $"{run.StartSector:000000}_{run.SectorCount:00000}.txt");
+            string text = Cp850.GetString(img.Slice(run.StartSector * Geometry.BytesPerSector, run.SectorCount * Geometry.BytesPerSector));
             File.WriteAllText(file, text, new UTF8Encoding(false));
         }
     }
@@ -160,17 +174,18 @@ static class TextCarver
 
     class TextRun
     {
-        public int Offset;
-        public int Length;
-        public int Score;
+        public int StartSector;
+        public int SectorCount;
         public int Lines;
-        public double HighBitRatio;
+        public int MinRatio;
         public string Sample = "";
 
-        public TextRun(int offset, int length)
+        public TextRun(int startSector, int sectorCount, int lines, int minRatio)
         {
-            Offset = offset;
-            Length = length;
+            StartSector = startSector;
+            SectorCount = sectorCount;
+            Lines = lines;
+            MinRatio = minRatio;
         }
     }
 }
