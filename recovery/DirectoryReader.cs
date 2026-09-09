@@ -1,3 +1,6 @@
+using recovery;
+using System.Text;
+
 namespace Recovery;
 
 /* scans the root directory sector range into a flat list. the reader
@@ -10,22 +13,25 @@ class DirectoryReader
     public static DirectoryReader Read(HddImage img, BootSector boot, FatTable fat)
     {
         var reader = new DirectoryReader();
-        int rootSectors = boot.RootDirSectors;
-        int rootOffset = (int)boot.RootDirStartSector * boot.BytesPerSector;
+        using var br = new BinaryReader(img.Stream, Encoding.ASCII, true);
+        br.BaseStream.Position = (long)boot.RootDirStartSector * boot.BytesPerSector;
 
-        for (int s = 0; s < rootSectors; s++)
+        int slots = boot.BytesPerSector / 32;
+        for (int s = 0; s < boot.RootDirSectors; s++)
         {
-            int off = rootOffset + s * boot.BytesPerSector;
-            var sector = img.Slice(off, boot.BytesPerSector);
-            for (int e = 0; e < boot.BytesPerSector / 32; e++)
+            for (int e = 0; e < slots; e++)
             {
-                var entry = DirEntry.TryParse(sector, e * 32);
-                if (entry == null)
+                byte[] slot = br.ReadBytesExactly(32);
+                if (slot[0] == 0x00)
                 {
-                    break;
+                    break; // end of directory
+                }
+                if (slot[11] == 0x0F)
+                {
+                    continue; // LFN shadow entry, skip and keep scanning
                 }
 
-                reader.Entries.Add(entry);
+                reader.Entries.Add(DirEntry.Parse(slot));
             }
         }
         return reader;

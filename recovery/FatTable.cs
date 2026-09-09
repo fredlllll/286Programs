@@ -1,3 +1,6 @@
+using recovery;
+using System.Text;
+
 namespace Recovery;
 
 /* the file allocation table: one entry per cluster telling whether it
@@ -21,9 +24,15 @@ class FatTable
     public static FatTable Read(HddImage img, BootSector boot)
     {
         int fatBytes = boot.FatSizeSectors * boot.BytesPerSector;
-        int fatOffset = (int)boot.FatStartSector * boot.BytesPerSector;
         int maxClusters = boot.TotalSectors / boot.SectorsPerCluster + 2;
         bool fat12 = boot.FatType == "FAT12";
+
+        /* the fat is just a packed blob; read it off the shared stream in
+           one go and unpack against this local buffer, so all offset math
+           stays relative to the fat start. */
+        using var reader = new BinaryReader(img.Stream, Encoding.ASCII, true);
+        reader.BaseStream.Position = (long)boot.FatStartSector * boot.BytesPerSector;
+        byte[] fat = reader.ReadBytesExactly(fatBytes);
 
         var entries = new int[maxClusters];
         entries[0] = entries[1] = -1;
@@ -31,9 +40,7 @@ class FatTable
         if (fat12)
         {
             /* 12-bit entries are packed 2 per 3 bytes, byte-aligned only
-               for even indices: entry n lives at byte n + n/2. the byte
-               offsets are relative to the fat start; compare them against
-               fatBytes, not the absolute image offset. */
+               for even indices: entry n lives at byte n + n/2. */
             for (int n = 2; n < maxClusters; n += 2)
             {
                 int rel = n + n / 2;
@@ -42,8 +49,7 @@ class FatTable
                     break;
                 }
 
-                int off = fatOffset + rel;
-                int b0 = img[off], b1 = img[off + 1], b2 = img[off + 2];
+                int b0 = fat[rel], b1 = fat[rel + 1], b2 = fat[rel + 2];
                 entries[n] = b0 | ((b1 & 0x0F) << 8);
                 if (n + 1 < maxClusters)
                 {
@@ -55,7 +61,7 @@ class FatTable
         {
             for (int n = 2; n < maxClusters && n * 2 + 2 <= fatBytes; n++)
             {
-                entries[n] = img.ReadU16(fatOffset + n * 2);
+                entries[n] = fat[n * 2] | (fat[n * 2 + 1] << 8);
             }
         }
         return new FatTable(entries, fat12);

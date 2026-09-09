@@ -29,9 +29,31 @@ class Program
             Console.WriteLine($"Using partition at LBA {part.Value.firstSectorLba} ({part.Value.type})");
             Console.WriteLine();
 
+            BootSector? boot = null;
             try
             {
-                var boot = BootSector.Parse(hdd, part.Value.firstSectorLba);
+                boot = BootSector.Parse(hdd, part.Value.firstSectorLba);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Boot sector at lba {part.Value.firstSectorLba} is unreadable ({ex.Message}).");
+                Console.WriteLine("Scanning the partition for a surviving FAT structure ...");
+                boot = BootSector.Locate(hdd, part.Value.firstSectorLba, part.Value.numSectorsLba);
+                if (boot == null)
+                {
+                    Console.WriteLine("No usable FAT structure found - carving raw data only.");
+                }
+            }
+
+            if (boot != null)
+            {
+                if (boot.Inferred)
+                {
+                    Console.WriteLine($"Located a FAT: fat at sector {boot.FatStartSector} ({boot.FatType}, reserved {boot.ReservedSectors}, " +
+                                      $"{boot.NumFats} FAT(s) of {boot.FatSizeSectors} sector(s), root at {boot.RootDirStartSector})");
+                    Console.WriteLine();
+                }
+
                 boot.Report();
                 Console.WriteLine();
 
@@ -47,10 +69,6 @@ class Program
                 {
                     FileRecoverer.Dump(hdd, boot, fat, root, args[1]);
                 }
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Filesystem parse failed: {ex.Message}");
             }
         }
         Console.WriteLine();
